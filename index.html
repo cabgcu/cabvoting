@@ -481,6 +481,18 @@
         .lb-count b { display: block; font-size: 20px; font-weight: 700; }
         .lb-count span { font-size: 12px; color: var(--text-dim); }
 
+        .bd { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; margin-top: 22px; border-top: 1px solid var(--line); }
+        .bd-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) minmax(0, 1.3fr) 92px; gap: 12px; align-items: center; }
+        .bd-name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .bd-name small { color: var(--text-dim); font-weight: 500; font-size: 12px; margin-left: 6px; }
+        .bd-bar { height: 8px; border-radius: 9999px; background: rgba(255,255,255,0.08); overflow: hidden; }
+        .bd-bar span { display: block; height: 100%; border-radius: 9999px; transition: width 0.5s; }
+        .bd-n { text-align: right; font-variant-numeric: tabular-nums; }
+        .bd-n b { font-size: 16px; } .bd-n span { color: var(--text-dim); font-size: 12px; margin-left: 4px; }
+        .lb-bar.lb-split-bar { display: flex; }
+        .lb-bar.lb-split-bar span { border-radius: 0; flex-shrink: 0; }
+        .lb-split { color: var(--text-dim); font-size: 12px; margin-top: 6px; display: flex; gap: 10px; flex-wrap: wrap; }
+        .lb-split i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
         .feed-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
         .feed-row:last-child { border-bottom: none; }
         .feed-row .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -519,6 +531,8 @@
             .cand-row .btns { grid-column: 3; grid-row: 1; }
             .cand-row .n { grid-row: 1; }
             .lb-count b { font-size: 17px; }
+            .bd-row { grid-template-columns: 10px minmax(0, 1fr) auto; }
+            .bd-bar { grid-column: 2 / 4; grid-row: 2; }
             .slug-prefix span { display: none; }
         }
     </style>
@@ -581,7 +595,18 @@
         <label class="stat-label">Event <span style="text-transform:none;">(optional — from VIP Check In)</span></label>
         <select id="nfEvent" class="modern-input" style="margin-bottom:16px;"></select>
 
-        <label class="stat-label">Performers / options <span style="text-transform:none;">(one per line — you can change these later)</span></label>
+        <label class="stat-label">Who can vote</label>
+        <select id="nfMethod" class="modern-input" style="margin-bottom:16px;"></select>
+
+        <label class="stat-label">Copy performers from <span style="text-transform:none;">(optional)</span></label>
+        <select id="nfCopy" class="modern-input" style="margin-bottom:16px;" onchange="newFormCopyChanged()"></select>
+
+        <label class="stat-label">Results group <span style="text-transform:none;">(forms in the same group combine into one result)</span></label>
+        <input id="nfGroup" class="modern-input" list="nfGroupList" style="margin-bottom:6px;" placeholder="Blank = this form's results stand alone" maxlength="60">
+        <datalist id="nfGroupList"></datalist>
+        <p class="hint" style="margin:0 0 16px;">e.g. put "GGT Arena", "GGT Online" and "GGT VIP" all in <b>GGT 2026</b>.</p>
+
+        <label class="stat-label" id="nfCandLabel">Performers / options <span style="text-transform:none;">(one per line — you can change these later)</span></label>
         <textarea id="nfCandidates" class="modern-input" rows="6" style="margin-bottom:20px; resize:vertical;" placeholder="Suntwist&#10;Mallary Bauman&#10;Shae Dale"></textarea>
 
         <div style="display:flex; justify-content:flex-end; gap:10px;">
@@ -643,7 +668,10 @@
                     <p class="hi" id="resEyebrow">Live results</p>
                     <h1 id="resTitle">—</h1>
                 </div>
-                <div class="seg" id="resStatusSeg"></div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <div class="seg" id="resScope"></div>
+                    <div class="seg" id="resStatusSeg"></div>
+                </div>
             </div>
 
             <div class="card">
@@ -655,11 +683,7 @@
                     </div>
                     <div class="progress-ring" id="resRing" style="--p:0"><div class="hole"><b id="resRingPct">0%</b><span id="resRingLabel">leader</span></div></div>
                 </div>
-                <div class="stat-grid">
-                    <div><div class="k">Online</div><div class="v"><span class="dot" style="background:var(--accent-blue)"></span><span id="resWeb">0</span></div></div>
-                    <div><div class="k">Manual / paper</div><div class="v"><span class="dot" style="background:var(--accent-purple)"></span><span id="resManual">0</span></div></div>
-                    <div><div class="k" id="resCandsLabel">Performers</div><div class="v"><span class="dot" style="background:var(--text-dim)"></span><span id="resCands">0</span></div></div>
-                </div>
+                <div class="bd" id="resBreakdown"></div>
             </div>
 
             <div class="card">
@@ -675,7 +699,7 @@
                 <div class="stack" style="gap:24px;">
                     <div class="card">
                         <div class="card-title"><h2>Manual votes</h2></div>
-                        <p class="page-sub" style="margin-top:-6px; margin-bottom:16px; font-size:13px;">Add paper ballots or judges' votes. Remove takes back the most recent manual votes for that option.</p>
+                        <p class="page-sub" style="margin-top:-6px; margin-bottom:16px; font-size:13px;">Add paper ballots or judges' votes to <b id="manualFormName"></b>. Remove takes back the most recent manual votes for that option.</p>
                         <select id="manualCand" class="modern-input" style="margin-bottom:10px;"></select>
                         <div class="inline-row">
                             <input id="manualCount" type="number" min="1" max="10000" value="1" class="modern-input" style="max-width:110px;">
@@ -685,9 +709,9 @@
                     </div>
                     <div class="card">
                         <div class="card-title"><h2>Let someone vote again</h2></div>
-                        <p class="page-sub" style="margin-top:-6px; margin-bottom:16px; font-size:13px;">Deletes this ID's ballot on this form so they can vote again.</p>
+                        <p class="page-sub" style="margin-top:-6px; margin-bottom:16px; font-size:13px;">Deletes this Student ID's or email's vote (on any form in the results group) so they can vote again.</p>
                         <div class="inline-row">
-                            <input id="clearVoterId" class="modern-input" placeholder="Student ID" inputmode="numeric" autocomplete="off">
+                            <input id="clearVoterId" class="modern-input" placeholder="Student ID or email" autocomplete="off">
                             <button class="btn-action secondary" onclick="clearVoter()">Clear vote</button>
                         </div>
                     </div>
@@ -977,9 +1001,10 @@
         const tag = document.getElementById('sideTag');
         tag.innerText = st === 'open' ? 'Live' : st === 'not_yet' ? 'Scheduled' : 'Closed';
         tag.style.background = st === 'open' ? 'var(--accent-purple)' : '#3f3f46';
-        const ballots = results ? results.ballots : (f ? f.ballots : 0);
+        const r = results && f && results._formId === f.id ? results : null;
+        const ballots = r ? r.ballots : (f ? f.ballots : 0);
         document.getElementById('sideBallots').innerText = Number(ballots || 0).toLocaleString();
-        document.getElementById('sideLabel').innerText = f ? `votes · ${f.name}` : 'no form selected';
+        document.getElementById('sideLabel').innerText = f ? `votes · ${r?._combined ? f.group_name.trim() + ' (combined)' : f.name}` : 'no form selected';
     }
 
     function openVotingPage() {
@@ -1016,13 +1041,25 @@
     }
     function stopResultsPolling() { if (resultsTimer) clearInterval(resultsTimer); resultsTimer = null; }
 
+    // Forms that share a results group count together ("GGT Arena" + "GGT Online" + "GGT VIP")
+    const METHOD_LABELS = { roster: 'Student ID list', any: 'Any ID', email: 'Email', guest_list: 'VIP guest list', open: 'One per phone' };
+    const FORM_COLORS = ['#2563eb', '#8b5cf6', '#ec4899', '#22c55e', '#f59e0b', '#06b6d4', '#ef4444', '#a3e635'];
+    let resultsCombined = true;
+    function groupKey(g) { return String(g || '').trim().toLowerCase() || null; }
+    function groupForms(f) { const k = groupKey(f.group_name); return k ? forms.filter(x => groupKey(x.group_name) === k) : [f]; }
+    function showCombined(f) { return resultsCombined && groupForms(f).length > 1; }
+    function nameKey(n) { return String(n || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+    function voterLabel(v) { return !v ? 'Manual' : v.startsWith('device:') ? 'Phone vote' : v; }
+    function setResultsScope(combined) { resultsCombined = combined; results = null; renderResults(); refreshResults(); }
+
     async function refreshResults() {
         const f = activeForm();
         if (!f || resultsBusy) return;
+        const combined = showCombined(f);
         resultsBusy = true;
         try {
-            const data = await rpc('voting_results', { p_form_id: f.id });
-            if (f.id === activeFormId) { results = data; renderResults(); }
+            const data = await rpc('voting_results', { p_form_id: f.id, p_combined: combined });
+            if (f.id === activeFormId && combined === showCombined(f)) { results = { ...data, _formId: f.id, _combined: combined }; renderResults(); }
         } catch (e) {
             console.warn('Results refresh failed', e);
         } finally {
@@ -1030,18 +1067,25 @@
         }
     }
 
+    // Adds performers up by name across the forms in the results, keeping a per-form split
     function rankedResults(f, r) {
-        const counts = {};
-        (r?.by_candidate || []).forEach(c => { counts[c.candidate_id] = c; });
-        const list = (f.candidates || []).map((c, i) => ({
-            id: c.id, name: c.name, subtitle: c.subtitle, order: i,
-            count: counts[c.id]?.count || 0, web: counts[c.id]?.web || 0, manual: counts[c.id]?.manual || 0
-        }));
-        // Votes for options that were since removed from the form
-        (r?.by_candidate || []).forEach(c => {
-            if (!list.some(x => x.id === c.candidate_id)) list.push({ id: c.candidate_id, name: c.name || 'Removed option', removed: true, order: 999, count: c.count, web: c.web, manual: c.manual });
+        const scope = r?.forms?.length ? r.forms : [{ form_id: f.id, name: f.name }];
+        const byKey = new Map();
+        const add = (name, subtitle, order) => {
+            const k = nameKey(name);
+            if (!byKey.has(k)) byKey.set(k, { key: k, name, subtitle, order, count: 0, manual: 0, per: {}, removed: false });
+            return byKey.get(k);
+        };
+        (f.candidates || []).forEach((c, i) => add(c.name, c.subtitle, i));
+        scope.forEach(sf => (forms.find(x => x.id === sf.form_id)?.candidates || []).forEach((c, i) => add(c.name, c.subtitle, 500 + i)));
+        (r?.by_candidate || []).forEach(row => {
+            const cand = forms.find(x => x.id === row.form_id)?.candidates?.find(c => c.id === row.candidate_id);
+            let e = byKey.get(nameKey(cand ? cand.name : row.name));
+            if (!e) { e = add(row.name || 'Removed option', '', 999); e.removed = true; }
+            e.count += row.count; e.manual += row.manual;
+            e.per[row.form_id] = (e.per[row.form_id] || 0) + row.count;
         });
-        return list.sort((a, b) => b.count - a.count || a.order - b.order);
+        return [...byKey.values()].sort((a, b) => b.count - a.count || a.order - b.order);
     }
 
     function renderResults() {
@@ -1055,23 +1099,43 @@
         }
         empty.innerHTML = '';
         body.style.display = 'flex';
-        const r = results;
         f.state = localState(f);
+        const combined = showCombined(f);
+        const r = results && results._formId === f.id && results._combined === combined ? results : null;
+        const group = groupForms(f);
 
-        document.getElementById('resEyebrow').innerText = [eventName(f.event_id), 'Live results'].filter(Boolean).join(' · ');
-        document.getElementById('resTitle').innerText = f.name;
+        document.getElementById('resEyebrow').innerText = combined
+            ? `Combined results · ${group.length} forms`
+            : [eventName(f.event_id), 'Live results'].filter(Boolean).join(' · ');
+        document.getElementById('resTitle').innerText = combined ? f.group_name.trim() : f.name;
+        document.getElementById('resScope').style.display = group.length > 1 ? '' : 'none';
+        document.getElementById('resScope').innerHTML = group.length > 1
+            ? `<button class="${combined ? 'on' : ''}" onclick="setResultsScope(true)">Combined</button><button class="${combined ? '' : 'on'}" onclick="setResultsScope(false)">${escapeHtml(f.name)} only</button>` : '';
         document.getElementById('resStatusSeg').innerHTML = ['closed', 'open', 'auto'].map(st =>
             `<button class="${f.status === st ? 'on' : ''}" onclick="setFormStatus('${f.id}', '${st}')">${{ closed: 'Closed', open: 'Open', auto: 'Scheduled' }[st]}</button>`).join('');
-        document.getElementById('resStateBadge').innerHTML = stateBadge(f);
+        document.getElementById('resStatusSeg').title = `Voting status of ${f.name}`;
+        document.getElementById('resStateBadge').innerHTML = combined ? '' : stateBadge(f);
 
-        const ballots = r ? r.ballots : f.ballots || 0;
+        const ballots = r ? r.ballots : (combined ? group.reduce((n, x) => n + (x.ballots || 0), 0) : f.ballots || 0);
         document.getElementById('resBallots').innerText = Number(ballots).toLocaleString();
         document.getElementById('resBallotsLabel').innerText = ballots === 1 ? 'vote' : 'votes';
         document.getElementById('resTrend').innerText = `${Number(r?.last_hour || 0).toLocaleString()} in the last hour`;
-        document.getElementById('resWeb').innerText = Number(r?.web_ballots || 0).toLocaleString();
-        document.getElementById('resManual').innerText = Number(r?.manual_ballots || 0).toLocaleString();
-        document.getElementById('resCands').innerText = (f.candidates || []).length;
-        document.getElementById('resCandsLabel').innerText = f.max_choices > 1 ? `Options · pick ${f.max_choices}` : 'Options';
+
+        // Breakdown: by voting method (form) when combined, online vs manual for one form
+        const scope = r?.forms || [];
+        const colorOf = id => FORM_COLORS[Math.max(0, scope.findIndex(x => x.form_id === id)) % FORM_COLORS.length];
+        const rows = combined
+            ? scope.map(x => ({ label: x.name, sub: METHOD_LABELS[x.voter_check] + (x.state === 'open' ? ' · open' : ''), n: x.ballots, color: colorOf(x.form_id) }))
+            : (() => { const m = scope[0]?.manual_ballots || 0; return [
+                { label: 'Online', sub: METHOD_LABELS[f.voter_check], n: ballots - m, color: FORM_COLORS[0] },
+                { label: 'Manual / paper', sub: '', n: m, color: FORM_COLORS[1] }]; })();
+        document.getElementById('resBreakdown').innerHTML = rows.map(x => `
+            <div class="bd-row">
+                <span class="dot" style="background:${x.color}"></span>
+                <div class="bd-name">${escapeHtml(x.label)}${x.sub ? `<small>${escapeHtml(x.sub)}</small>` : ''}</div>
+                <div class="bd-bar"><span style="width:${ballots ? (x.n / ballots * 100).toFixed(1) : 0}%; background:${x.color}"></span></div>
+                <div class="bd-n"><b>${Number(x.n).toLocaleString()}</b><span>${ballots ? Math.round(x.n / ballots * 100) : 0}%</span></div>
+            </div>`).join('');
 
         const ranked = rankedResults(f, r);
         const picks = r?.picks || 0;
@@ -1082,24 +1146,32 @@
         document.getElementById('resRingLabel').innerText = lead && lead.count ? 'leader share' : 'no votes yet';
 
         const max = Math.max(1, ...ranked.map(c => c.count));
-        document.getElementById('leaderboard').innerHTML = ranked.length ? ranked.map((c, i) => `
+        document.getElementById('leaderboard').innerHTML = ranked.length ? ranked.map((c, i) => {
+            const bar = combined
+                ? `<div class="lb-bar lb-split-bar">${scope.map(x => c.per[x.form_id] ? `<span style="width:${(c.per[x.form_id] / max * 100).toFixed(2)}%; background:${colorOf(x.form_id)}"></span>` : '').join('')}</div>`
+                : `<div class="lb-bar"><span style="width:${(c.count / max * 100).toFixed(1)}%"></span></div>`;
+            const split = combined && c.count
+                ? `<div class="lb-split">${scope.filter(x => c.per[x.form_id]).map(x => `<span><i style="background:${colorOf(x.form_id)}"></i>${escapeHtml(x.name)} ${c.per[x.form_id].toLocaleString()}</span>`).join('')}</div>` : '';
+            return `
             <div class="lb-row ${i === 0 && c.count > 0 ? 'first' : ''}">
                 <div class="lb-rank">${i + 1}</div>
                 <div style="min-width:0;">
                     <div class="lb-name">${escapeHtml(c.name)}${c.subtitle ? `<small>${escapeHtml(c.subtitle)}</small>` : ''}${c.removed ? '<span class="status-badge na">Removed</span>' : ''}</div>
-                    <div class="lb-bar"><span style="width:${(c.count / max * 100).toFixed(1)}%"></span></div>
+                    ${bar}${split}
                 </div>
-                <div class="lb-count"><b>${c.count.toLocaleString()}</b><span>${picks ? Math.round(c.count / picks * 100) : 0}%${c.manual ? ` · ${c.manual.toLocaleString()} manual` : ''}</span></div>
-            </div>`).join('') : `<div class="empty-note">No options on this form yet. <button class="link-btn" onclick="toggleView('forms')">Add them in Voting Forms</button></div>`;
+                <div class="lb-count"><b>${c.count.toLocaleString()}</b><span>${picks ? Math.round(c.count / picks * 100) : 0}%${!combined && c.manual ? ` · ${c.manual.toLocaleString()} manual` : ''}</span></div>
+            </div>`; }).join('') : `<div class="empty-note">No options on this form yet. <button class="link-btn" onclick="toggleView('forms')">Add them in Voting Forms</button></div>`;
 
         const recent = r?.recent || [];
+        const formName = id => (scope.find(x => x.form_id === id) || {}).name || '';
         document.getElementById('recentFeed').innerHTML = recent.length ? recent.map(v => `
             <div class="feed-row">
-                <div class="who"><b>${escapeHtml(v.voter_id || 'Manual')}</b> <span style="color:var(--text-dim);">→</span> ${escapeHtml(v.candidate_name || '')}</div>
-                <div class="when">${v.method !== 'WEB' ? '<span class="group-tag" style="margin-right:6px;">Manual</span>' : ''}${fmtTime(v.created_at)}</div>
+                <div class="who"><b>${escapeHtml(voterLabel(v.voter_id))}</b> <span style="color:var(--text-dim);">→</span> ${escapeHtml(v.candidate_name || '')}</div>
+                <div class="when">${combined ? `<span class="group-tag" style="margin-right:6px;">${escapeHtml(formName(v.form_id))}</span>` : v.method !== 'WEB' ? '<span class="group-tag" style="margin-right:6px;">Manual</span>' : ''}${fmtTime(v.created_at)}</div>
             </div>`).join('') : '<div class="empty-note">Waiting for votes…</div>';
         document.getElementById('resUpdated').innerText = r ? 'Updated ' + fmtTime(new Date().toISOString()) : '';
 
+        document.getElementById('manualFormName').innerText = f.name;
         const sel = document.getElementById('manualCand');
         const prev = sel.value;
         sel.innerHTML = (f.candidates || []).map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('') || '<option value="">No options yet</option>';
@@ -1134,10 +1206,10 @@
         const input = document.getElementById('clearVoterId');
         const id = input.value.trim();
         if (!f || !id) return;
-        if (!confirm(`Delete ${id}'s vote on ${f.name} so they can vote again?`)) return;
+        if (!confirm(`Delete ${id}'s vote so they can vote again?`)) return;
         try {
             const n = await rpc('voting_clear_voter', { p_form_id: f.id, p_voter: id });
-            showToast(n ? `${id} can vote again` : `${id} hasn't voted on this form`);
+            showToast(n ? `${id} can vote again` : `${id} hasn't voted`);
             input.value = '';
             refreshResults();
         } catch (e) { console.error(e); showToast('⚠️ Couldn\'t clear that vote'); }
@@ -1160,22 +1232,30 @@
     async function exportVotes() {
         const f = activeForm();
         if (!f) return;
+        const combined = showCombined(f);
         setLoading(true, 'EXPORTING...');
         try {
-            const rows = await rpc('voting_export', { p_form_id: f.id });
+            const [rows, r] = await Promise.all([
+                rpc('voting_export', { p_form_id: f.id, p_combined: combined }),
+                rpc('voting_results', { p_form_id: f.id, p_combined: combined })
+            ]);
             const csvCell = v => { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-            const ranked = rankedResults(f, results);
+            const scope = r.forms || [];
+            const ranked = rankedResults(f, r);
             const lines = [
-                ['Option', 'Votes', 'Online', 'Manual'].join(','),
-                ...ranked.map(c => [c.name, c.count, c.web, c.manual].map(csvCell).join(',')),
+                ['Option', 'Total', ...scope.map(x => x.name), 'Manual'].map(csvCell).join(','),
+                ...ranked.map(c => [c.name, c.count, ...scope.map(x => c.per[x.form_id] || 0), c.manual].map(csvCell).join(',')),
                 '',
-                ['Ballot', 'Student ID', 'Choice', 'Method', 'Time'].join(','),
-                ...rows.map(r => [r.ballot_id, r.voter_id || '', r.candidate_name, r.method, new Date(r.created_at).toLocaleString()].map(csvCell).join(','))
+                ['Voting method', 'Votes'].join(','),
+                ...scope.map(x => [x.name + ' (' + METHOD_LABELS[x.voter_check] + ')', x.ballots].map(csvCell).join(',')),
+                '',
+                ['Form', 'Ballot', 'Voter', 'Choice', 'Method', 'Time'].join(','),
+                ...rows.map(v => [v.form, v.ballot_id, voterLabel(v.voter_id), v.candidate_name, v.method, new Date(v.created_at).toLocaleString()].map(csvCell).join(','))
             ];
             const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = `${f.slug}-votes-${new Date().toISOString().slice(0, 10)}.csv`;
+            a.download = `${combined ? slugify(f.group_name) + '-combined' : f.slug}-votes-${new Date().toISOString().slice(0, 10)}.csv`;
             document.body.appendChild(a); a.click(); a.remove();
             setTimeout(() => URL.revokeObjectURL(a.href), 2000);
         } catch (e) { console.error(e); showToast('⚠️ Export failed'); }
@@ -1186,6 +1266,22 @@
     function eventOptions(selected) {
         return `<option value="">No event</option>` + events.map(e =>
             `<option value="${escapeHtml(e.id)}" ${String(e.id) === String(selected || '') ? 'selected' : ''}>${escapeHtml(e.name)}</option>`).join('');
+    }
+
+    const VOTER_CHECK_OPTIONS = [
+        ['roster', 'Student ID on the Student ID list'],
+        ['any', 'Any ID (once each)'],
+        ['email', 'Email address (once each) — e.g. online viewers'],
+        ['guest_list', 'Email on the VIP Check In guest list for the event'],
+        ['open', 'No ID — one vote per phone']
+    ];
+    function voterCheckOptions(selected) {
+        return VOTER_CHECK_OPTIONS.map(([v, l]) => `<option value="${v}" ${v === (selected || 'roster') ? 'selected' : ''}>${l}</option>`).join('');
+    }
+    function groupDatalist() {
+        const names = new Map();
+        forms.forEach(f => { const k = groupKey(f.group_name); if (k && !names.has(k)) names.set(k, f.group_name.trim()); });
+        return `<datalist id="groupList">${[...names.values()].map(n => `<option value="${escapeHtml(n)}">`).join('')}</datalist>`;
     }
 
     function candidateRow(c, i) {
@@ -1242,7 +1338,7 @@
             el.innerHTML = `<div class="card welcome"><h2>Create your first voting form</h2><p>Each form is its own voting page with its own link — one per event or award. Add the performers, open voting, and watch results come in live.</p><button class="btn-action" onclick="openNewForm()">New voting form</button></div>`;
             return;
         }
-        el.innerHTML = forms.map(f => {
+        el.innerHTML = groupDatalist() + forms.map(f => {
             f.state = localState(f);
             const link = voteLink(f.slug);
             const id = escapeHtml(f.id);
@@ -1255,7 +1351,7 @@
                 <div class="fc-head">
                     <div>
                         <h3>${escapeHtml(f.name)}${f.id === activeFormId ? ' <span class="status-badge draft" style="vertical-align:middle;">Active</span>' : ''}</h3>
-                        <div class="fc-meta">${stateBadge(f)}<span>${plural(f.ballots || 0, 'vote')}</span><span>· ${plural(cands.length, 'option')}</span>${f.max_choices > 1 ? `<span>· pick ${f.max_choices}</span>` : ''}${ev ? `<span class="group-tag">${escapeHtml(ev)}</span>` : ''}</div>
+                        <div class="fc-meta">${stateBadge(f)}<span>${plural(f.ballots || 0, 'vote')}</span><span>· ${plural(cands.length, 'option')}</span>${f.max_choices > 1 ? `<span>· pick ${f.max_choices}</span>` : ''}<span>· ${escapeHtml(METHOD_LABELS[f.voter_check] || '')}${f.access_code ? ' + code' : ''}</span>${f.group_name ? `<span class="group-tag" title="Results combine with every form in this group">Results: ${escapeHtml(f.group_name)}</span>` : ''}${ev ? `<span class="group-tag">${escapeHtml(ev)}</span>` : ''}${f.voter_check === 'guest_list' && !f.event_id ? '<span class="status-badge draft">Pick an event for the guest list</span>' : ''}</div>
                     </div>
                     <div class="seg">${seg}</div>
                 </div>
@@ -1285,13 +1381,15 @@
                     </div>
                     <div class="form-grid" style="margin-bottom:16px;">
                         <div><label class="stat-label">Page title <span style="text-transform:none;">(on the voting page)</span></label><input class="modern-input" ${fid('title')} value="${escapeHtml(f.title || '')}" placeholder="${escapeHtml(f.name)}" maxlength="120"></div>
-                        <div><label class="stat-label">Who can vote</label><select class="modern-input" ${fid('voter_check')}>
-                            <option value="roster" ${f.voter_check !== 'any' ? 'selected' : ''}>Only IDs on the Student ID list</option>
-                            <option value="any" ${f.voter_check === 'any' ? 'selected' : ''}>Any ID (once each)</option>
-                        </select></div>
+                        <div><label class="stat-label">Who can vote</label><select class="modern-input" ${fid('voter_check')}>${voterCheckOptions(f.voter_check)}</select></div>
                     </div>
                     <div class="form-grid" style="margin-bottom:16px;">
-                        <div><label class="stat-label">ID field label</label><input class="modern-input" ${fid('id_label')} value="${escapeHtml(f.id_label || 'Student ID')}" maxlength="40"></div>
+                        <div><label class="stat-label">Results group <span style="text-transform:none;">(combine with other forms)</span></label><input class="modern-input" list="groupList" ${fid('group_name')} value="${escapeHtml(f.group_name || '')}" placeholder="e.g. GGT 2026" maxlength="60"></div>
+                        <div><label class="stat-label">Access code <span style="text-transform:none;">(optional)</span></label><input class="modern-input" ${fid('access_code')} value="${escapeHtml(f.access_code || '')}" placeholder="Blank = no code" maxlength="40" autocomplete="off"></div>
+                    </div>
+                    <p class="hint">Forms with the same results group add up into one result, matched by performer name, with a breakdown by form. One Student ID or email can vote once across the whole group. The access code is something voters must type in, e.g. a code you give VIPs or show on the stream.</p>
+                    <div class="form-grid" style="margin-bottom:16px;">
+                        <div><label class="stat-label">ID field label <span style="text-transform:none;">(Student ID / Any ID forms)</span></label><input class="modern-input" ${fid('id_label')} value="${escapeHtml(f.id_label || 'Student ID')}" maxlength="40"></div>
                         <div></div>
                     </div>
                     <label class="stat-label">Intro text</label>
@@ -1351,6 +1449,8 @@
             opens_at: val('opens_at') !== undefined ? localInputToIso(val('opens_at')) : (f.opens_at || ''),
             closes_at: val('closes_at') !== undefined ? localInputToIso(val('closes_at')) : (f.closes_at || ''),
             voter_check: pick('voter_check', f.voter_check),
+            group_name: pick('group_name', f.group_name || '').trim(),
+            access_code: pick('access_code', f.access_code || '').trim(),
             id_label: pick('id_label', f.id_label),
             max_choices: parseInt(pick('max_choices', f.max_choices), 10) || 1,
             candidates,
@@ -1362,6 +1462,7 @@
     async function saveFormObject(obj, message) {
         if (!obj.name) { showToast('Give the form a name'); return null; }
         if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(obj.slug)) { showToast('Link ending: letters, numbers and dashes only'); return null; }
+        if (obj.voter_check === 'guest_list' && !obj.event_id) { showToast('Pick the event whose VIP guest list can vote'); return null; }
         setLoading(true, 'SAVING...');
         try {
             const res = await rpc('voting_form_save', { p_form: obj });
@@ -1459,11 +1560,29 @@
         const slug = document.getElementById('nfSlug');
         slug.value = ''; delete slug.dataset.touched;
         document.getElementById('nfCandidates').value = '';
+        document.getElementById('nfGroup').value = '';
         document.getElementById('nfEvent').innerHTML = eventOptions('');
+        document.getElementById('nfMethod').innerHTML = voterCheckOptions('roster');
+        document.getElementById('nfCopy').innerHTML = '<option value="">Don\'t copy — type them below</option>' +
+            forms.map(f => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.name)} (${plural((f.candidates || []).length, 'option')})</option>`).join('');
+        document.getElementById('nfGroupList').innerHTML = groupDatalist().replace(/^<datalist id="groupList">|<\/datalist>$/g, '');
+        newFormCopyChanged();
         document.getElementById('nfSlugPrefix').innerText = voteLink('').replace(/^https?:\/\//, '').replace(/\?f=$/, '') + '?f=';
         document.getElementById('newFormModal').style.display = 'flex';
         document.body.classList.add('modal-open');
         setTimeout(() => document.getElementById('nfName').focus(), 50);
+    }
+    // Copying performers from a form usually means "another way to vote for the same event":
+    // fill in that form's event and results group (or start a group named after it)
+    function newFormCopyChanged() {
+        const src = forms.find(f => f.id === document.getElementById('nfCopy').value);
+        const ta = document.getElementById('nfCandidates');
+        ta.style.display = src ? 'none' : '';
+        document.getElementById('nfCandLabel').style.display = src ? 'none' : '';
+        if (!src) return;
+        const group = document.getElementById('nfGroup');
+        if (!group.value.trim()) group.value = (src.group_name || src.name).trim();
+        if (src.event_id) document.getElementById('nfEvent').value = src.event_id;
     }
     function closeNewForm() {
         document.getElementById('newFormModal').style.display = 'none';
@@ -1480,17 +1599,29 @@
         if (!name) { showToast('Give the form a name'); return; }
         if (!slug) { showToast('Add a link ending'); return; }
         if (forms.some(f => f.slug === slug)) { showToast('Another form already uses that link'); return; }
-        const candidates = document.getElementById('nfCandidates').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-            .map(n => ({ id: newCandidateId(), name: n.slice(0, 80), subtitle: '', image_url: '' }));
+        const src = forms.find(f => f.id === document.getElementById('nfCopy').value);
+        const candidates = src
+            ? (src.candidates || []).map(c => ({ ...c }))
+            : document.getElementById('nfCandidates').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+                .map(n => ({ id: newCandidateId(), name: n.slice(0, 80), subtitle: '', image_url: '' }));
+        const group = document.getElementById('nfGroup').value.trim();
+        const method = document.getElementById('nfMethod').value;
         const btn = document.getElementById('nfCreateBtn');
         btn.disabled = true;
         const saved = await saveFormObject({
-            id: null, name, slug, event_id: document.getElementById('nfEvent').value, title: '', intro: '', banner_url: '',
-            status: 'closed', opens_at: '', closes_at: '', voter_check: 'roster', id_label: 'Student ID', max_choices: 1,
-            candidates, closed_message: '', success_message: ''
+            id: null, name, slug, event_id: document.getElementById('nfEvent').value, title: src?.title || '', intro: src?.intro || '',
+            banner_url: src?.banner_url || '', status: 'closed', opens_at: '', closes_at: '', voter_check: method,
+            id_label: method === 'any' ? (src?.id_label || 'Student ID') : 'Student ID', max_choices: src?.max_choices || 1,
+            group_name: group, access_code: '', candidates, closed_message: src?.closed_message || '', success_message: src?.success_message || ''
         }, `${name} created`);
         btn.disabled = false;
         if (!saved) return;
+        // The form it was copied from joins the same results group
+        if (src && group && groupKey(src.group_name) !== groupKey(group)) {
+            if (await saveFormObject({ ...gatherForm(src.id, false), group_name: group }, null)) {
+                showToast(`${src.name} and ${name} now combine into one result: ${group}`);
+            }
+        }
         closeNewForm();
         setActiveForm(saved.id);
         toggleView('forms');

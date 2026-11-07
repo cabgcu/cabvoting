@@ -21,6 +21,7 @@ h1 { margin: 0 0 6px; font-size: 24px; line-height: 1.2; }
 label, .lbl { display: block; color: var(--muted); font-size: 13px; font-weight: 600; margin: 20px 0 8px; }
 input { width: 100%; height: 54px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--inset); color: var(--text); font-family: inherit; font-size: 20px; font-weight: 600; text-align: center; letter-spacing: .04em; outline: none; }
 input:focus { border-color: #52525b; }
+input.email { font-size: 17px; letter-spacing: 0; }
 input::placeholder { color: #52525b; font-weight: 500; font-size: 16px; letter-spacing: 0; }
 .opt { display: flex; align-items: center; gap: 12px; width: 100%; margin-bottom: 8px; padding: 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--inset); color: var(--text); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
 .opt .n { width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; background: #26262d; color: var(--muted); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
@@ -110,18 +111,37 @@ document.addEventListener('visibilitychange', function () {
   if (document.visibilityState === 'visible' && waitTimer && form && form.state !== 'open') load();
 });
 
+// ── Who is voting ──────────────────────────────────────────
+// Student ID forms ask for an ID, email forms for an email, open forms nothing (one vote per phone).
+function mode() { return form.voter_check || 'roster'; }
+function asksEmail() { return mode() === 'email' || mode() === 'guest_list'; }
+function asksId() { return mode() !== 'open'; }
+function idLabel() { return asksEmail() ? 'Email' : (form.id_label || 'Student ID'); }
+function deviceId() {
+  var id = null;
+  try { id = localStorage.getItem('cab_vote_device'); } catch (e) {}
+  if (!id || !/^[a-z0-9-]{8,64}$/.test(id)) {
+    id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+    id = id.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 64);
+    try { localStorage.setItem('cab_vote_device', id); } catch (e) {}
+  }
+  return id;
+}
+
 // ── Ballot: ID + choices on one screen ──────────────────────
 function maxPicks() { return Math.max(1, Math.min(form.max_choices || 1, form.candidates.length || 1)); }
 
 function showBallot(err) {
   clearTimeout(waitTimer); waitTimer = null;
-  var max = maxPicks(), label = form.id_label || 'Student ID';
-  var id = $('vid') ? $('vid').value : '';
+  var max = maxPicks(), label = idLabel();
+  var id = $('vid') ? $('vid').value : '', code = $('vcode') ? $('vcode').value : '';
   var banner = url(form.banner_url);
   app.innerHTML = (banner ? '<img class="banner" src="' + esc(banner) + '" alt="">' : '') +
     '<div class="body"><h1>' + esc(form.title) + '</h1>' + (form.intro ? '<p class="intro">' + esc(form.intro) + '</p>' : '') +
-    '<label for="vid">' + esc(label) + '</label>' +
-    '<input id="vid" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="40" placeholder="Enter your ' + esc(label) + '">' +
+    (!asksId() ? '' : asksEmail()
+      ? '<label for="vid">Email</label><input id="vid" class="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="200" placeholder="you@example.com">'
+      : '<label for="vid">' + esc(label) + '</label><input id="vid" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="40" placeholder="Enter your ' + esc(label) + '">') +
+    (form.needs_code ? '<label for="vcode">Access code</label><input id="vcode" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="Enter the code">' : '') +
     '<div class="lbl">' + (max > 1 ? 'Pick up to ' + max : 'Pick one') + '</div>' +
     form.candidates.map(function (c, i) {
       var img = url(c.image_url);
@@ -130,8 +150,11 @@ function showBallot(err) {
         '<span class="t">' + esc(c.name) + (c.subtitle ? '<small>' + esc(c.subtitle) + '</small>' : '') + '</span><span class="c"></span></button>';
     }).join('') +
     '<button class="btn" id="go" onclick="vote()">Vote</button><div class="err" id="err">' + esc(err || '') + '</div></div>';
-  $('vid').value = id;
-  $('vid').addEventListener('input', function () { $('err').textContent = ''; sync(); });
+  ['vid', 'vcode'].forEach(function (k) {
+    if (!$(k)) return;
+    $(k).value = k === 'vid' ? id : code;
+    $(k).addEventListener('input', function () { $('err').textContent = ''; sync(); });
+  });
   sync();
 }
 
@@ -152,19 +175,20 @@ function sync() {
     opts[i].className = on ? 'opt on' : 'opt';
     opts[i].setAttribute('aria-pressed', on);
   }
-  $('go').disabled = sending || !picked.length || !$('vid').value.trim();
+  $('go').disabled = sending || !picked.length || ($('vid') && !$('vid').value.trim()) || ($('vcode') && !$('vcode').value.trim());
   $('go').textContent = sending ? 'Sending…' : (picked.length > 1 ? 'Vote for ' + picked.length : 'Vote');
 }
 
 // ── Cast the vote (call 2) ─────────────────────────────────
 // The database checks the ID, the picks and double votes in this one call.
 function vote() {
-  var voter = $('vid').value.trim(), label = form.id_label || 'Student ID';
+  var voter = asksId() ? $('vid').value.trim() : 'device:' + deviceId(), label = idLabel();
+  var code = $('vcode') ? $('vcode').value.trim() : null;
   if (sending || !voter || !picked.length) return;
   sending = true; sync(); $('err').textContent = '';
   var unsure = false, tries = 0;
   (function attempt() {
-    call('cast_vote', { p_slug: SLUG, p_voter: voter, p_choices: picked }).then(function (d) {
+    call('cast_vote', { p_slug: SLUG, p_voter: voter, p_choices: picked, p_code: code }).then(function (d) {
       if (d && d.retry && tries < 4) {          // dropped / busy: try again, backing off
         unsure = true; tries++;
         $('err').textContent = 'Network is busy — still sending…';
@@ -174,8 +198,18 @@ function vote() {
       if (!d || d.retry || d.failed) { sync(); $('err').textContent = 'Couldn\'t send your vote. Check your signal and tap Vote again.'; return; }
       // A retry that hits "already" means an earlier try got through
       if (d.ok || (d.error === 'already' && unsure)) return done();
-      if (d.error === 'already') return state('✅', 'Already voted', label + ' ' + voter + ' has already voted. Thanks!', '<button class="btn alt" onclick="again()">Use a different ' + esc(label) + '</button>');
-      if (d.error === 'not_on_list' || d.error === 'id') { sync(); $('err').textContent = 'That ' + label + ' can\'t vote. Double-check it.'; $('vid').focus(); return; }
+      if (d.error === 'already') return asksId()
+        ? state('✅', 'Already voted', voter + ' has already voted. Thanks!', '<button class="btn alt" onclick="again()">Use a different ' + esc(label) + '</button>')
+        : state('✅', 'Already voted', 'This phone has already voted. Thanks!');
+      if (d.error === 'code') { sync(); $('err').textContent = 'That access code isn\'t right.'; $('vcode').focus(); return; }
+      if (d.error === 'not_on_list' || d.error === 'id') {
+        sync();
+        $('err').textContent = d.error === 'id' && asksEmail() ? 'Enter a valid email address.'
+          : mode() === 'guest_list' ? 'That email isn\'t on the VIP guest list. Use the email you registered with.'
+          : 'That ' + label + ' can\'t vote. Double-check it.';
+        if ($('vid')) $('vid').focus();
+        return;
+      }
       if (d.error === 'closed') { picked = []; return load(); }
       picked = []; form = null; return load();   // options changed — reload them
     });
