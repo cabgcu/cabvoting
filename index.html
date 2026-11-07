@@ -578,6 +578,21 @@
     </div>
 </div>
 
+<!-- POLL EVERYWHERE IMPORT MODAL -->
+<div id="smsModal" class="modal-overlay" onclick="if (event.target === this) closeSmsImport()">
+    <div class="modal-content" style="max-width: 680px;">
+        <button class="close-modal" onclick="closeSmsImport()">&times;</button>
+        <h2 class="page-title">Import text votes</h2>
+        <p class="page-sub">Into <b id="smsFormName"></b>. In Poll Everywhere, open the poll's report and download the responses as a CSV (with phone numbers), then choose it here. Each phone number counts once across the results group.</p>
+        <input type="file" id="smsFile" accept=".csv,text/csv" style="display:none;" onchange="loadSmsFile(this.files[0]); this.value='';">
+        <div class="inline-row" style="margin-bottom:18px;">
+            <button class="btn-action secondary" onclick="document.getElementById('smsFile').click()">Choose CSV file</button>
+            <span id="smsFileName" style="color:var(--text-muted); font-size:13px;"></span>
+        </div>
+        <div id="smsBody"></div>
+    </div>
+</div>
+
 <!-- NEW FORM MODAL -->
 <div id="newFormModal" class="modal-overlay" onclick="if (event.target === this) closeNewForm()">
     <div class="modal-content" style="max-width: 600px;">
@@ -624,7 +639,7 @@
             <div><div class="t">CAB Voting</div><div class="s">Canyon Activities Board</div></div>
         </div>
         <div class="side-event">
-            <label for="formDropdown">Active voting form</label>
+            <label for="formDropdown">Active event / form</label>
             <select id="formDropdown" onchange="switchForm(this.value)"></select>
         </div>
         <nav class="side-nav">
@@ -646,7 +661,7 @@
     <main class="main" id="mainScroll">
         <header class="app-header">
             <div class="mobile-event side-event">
-                <label for="formDropdownMobile">Active voting form</label>
+                <label for="formDropdownMobile">Active event / form</label>
                 <select id="formDropdownMobile" onchange="switchForm(this.value)"></select>
             </div>
             <div class="header-actions">
@@ -697,9 +712,15 @@
                     <div id="recentFeed"></div>
                 </div>
                 <div class="stack" style="gap:24px;">
+                    <div class="card" id="smsCard" style="display:none;">
+                        <div class="card-title"><h2>Text votes</h2></div>
+                        <p class="page-sub" style="margin-top:-6px; margin-bottom:16px; font-size:13px;">Upload Poll Everywhere's CSV export. Upload a newer export anytime — phone numbers already counted are skipped.</p>
+                        <div id="smsCardButtons" class="inline-row"></div>
+                    </div>
                     <div class="card">
                         <div class="card-title"><h2>Manual votes</h2></div>
                         <p class="page-sub" style="margin-top:-6px; margin-bottom:16px; font-size:13px;">Add paper ballots or judges' votes to <b id="manualFormName"></b>. Remove takes back the most recent manual votes for that option.</p>
+                        <select id="manualForm" class="modern-input" style="margin-bottom:10px; display:none;" onchange="renderManualCands()"></select>
                         <select id="manualCand" class="modern-input" style="margin-bottom:10px;"></select>
                         <div class="inline-row">
                             <input id="manualCount" type="number" min="1" max="10000" value="1" class="modern-input" style="max-width:110px;">
@@ -722,7 +743,7 @@
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;">
                     <div>
                         <div style="font-weight:600; color:var(--danger-text); margin-bottom:4px;">Reset votes</div>
-                        <div style="color:var(--text-muted); font-size:13px;">Deletes every vote on this form. The form, its link and the student ID list stay.</div>
+                        <div style="color:var(--text-muted); font-size:13px;">Deletes every vote on the results you're looking at (every form in the group when combined). The forms, their links and the student ID list stay.</div>
                     </div>
                     <button class="btn-ghost" style="color:var(--danger-text); border-color:var(--danger-border);" onclick="resetVotes()">Reset all votes</button>
                 </div>
@@ -980,15 +1001,36 @@
         renderFormPickers();
     }
 
-    function switchForm(id) {
-        setActiveForm(id);
+    // The picker shows one entry per results group ("GGT 2026 · 3 forms") and forms on their own
+    function grouped(f) { return !!f && groupForms(f).length > 1; }
+    function pickerValue() { const f = activeForm(); return !f ? '' : grouped(f) ? 'g:' + groupKey(f.group_name) : f.id; }
+
+    function switchForm(value) {
+        if (String(value).startsWith('g:')) {
+            const members = forms.filter(f => groupKey(f.group_name) === value.slice(2))
+                .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            resultsCombined = true;
+            setActiveForm(members.some(f => f.id === activeFormId) ? activeFormId : members[0]?.id || null);
+        } else {
+            resultsCombined = true;
+            setActiveForm(value);
+        }
         if (currentView === 'results') { renderResults(); refreshResults(); }
+        if (currentView === 'forms') renderForms(true);
     }
 
     function renderFormPickers() {
-        const opts = forms.length
-            ? forms.map(f => `<option value="${escapeHtml(f.id)}" ${f.id === activeFormId ? 'selected' : ''}>${escapeHtml(f.name)}</option>`).join('')
-            : '<option value="">No voting forms yet</option>';
+        const seen = new Set();
+        const current = pickerValue();
+        const opts = forms.map(f => {
+            if (grouped(f)) {
+                const k = groupKey(f.group_name);
+                if (seen.has(k)) return '';
+                seen.add(k);
+                return `<option value="${escapeHtml('g:' + k)}" ${current === 'g:' + k ? 'selected' : ''}>${escapeHtml(f.group_name.trim())} · ${groupForms(f).length} forms</option>`;
+            }
+            return `<option value="${escapeHtml(f.id)}" ${current === f.id ? 'selected' : ''}>${escapeHtml(f.name)}</option>`;
+        }).join('') || '<option value="">No voting forms yet</option>';
         document.getElementById('formDropdown').innerHTML = opts;
         document.getElementById('formDropdownMobile').innerHTML = opts;
         document.getElementById('navCountForms').innerText = forms.length || '';
@@ -997,7 +1039,8 @@
 
     function renderSideCard() {
         const f = activeForm();
-        const st = f ? localState(f) : 'closed';
+        const members = f && resultsCombined ? groupForms(f) : (f ? [f] : []);
+        const st = members.some(x => localState(x) === 'open') ? 'open' : members.some(x => localState(x) === 'not_yet') ? 'not_yet' : 'closed';
         const tag = document.getElementById('sideTag');
         tag.innerText = st === 'open' ? 'Live' : st === 'not_yet' ? 'Scheduled' : 'Closed';
         tag.style.background = st === 'open' ? 'var(--accent-purple)' : '#3f3f46';
@@ -1042,15 +1085,33 @@
     function stopResultsPolling() { if (resultsTimer) clearInterval(resultsTimer); resultsTimer = null; }
 
     // Forms that share a results group count together ("GGT Arena" + "GGT Online" + "GGT VIP")
-    const METHOD_LABELS = { roster: 'Student ID list', any: 'Any ID', email: 'Email', guest_list: 'VIP guest list', open: 'One per phone' };
+    const METHOD_LABELS = { roster: 'Student ID list', any: 'Any ID', email: 'Email', guest_list: 'VIP guest list', open: 'One per phone', sms: 'Text message (Poll Everywhere)' };
     const FORM_COLORS = ['#2563eb', '#8b5cf6', '#ec4899', '#22c55e', '#f59e0b', '#06b6d4', '#ef4444', '#a3e635'];
     let resultsCombined = true;
     function groupKey(g) { return String(g || '').trim().toLowerCase() || null; }
-    function groupForms(f) { const k = groupKey(f.group_name); return k ? forms.filter(x => groupKey(x.group_name) === k) : [f]; }
+    function groupForms(f) {
+        const k = groupKey(f.group_name);
+        return k ? forms.filter(x => groupKey(x.group_name) === k).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)) : [f];
+    }
     function showCombined(f) { return resultsCombined && groupForms(f).length > 1; }
     function nameKey(n) { return String(n || '').trim().toLowerCase().replace(/\s+/g, ' '); }
-    function voterLabel(v) { return !v ? 'Manual' : v.startsWith('device:') ? 'Phone vote' : v; }
+    function voterLabel(v) { return !v ? 'Manual' : v.startsWith('device:') ? 'Phone vote' : v.startsWith('sms:') ? 'Text …' + v.slice(-4) : v; }
     function setResultsScope(combined) { resultsCombined = combined; results = null; renderResults(); refreshResults(); }
+    // Look at one form of the group on its own (the picker stays on the group)
+    function selectScopeForm(id) { resultsCombined = false; setActiveForm(id); renderResults(); refreshResults(); }
+
+    // Open / close every form in the group at once
+    async function setGroupStatus(status) {
+        const members = groupForms(activeForm());
+        if (status === 'open' && members.some(m => !(m.candidates || []).length)) { showToast('Every form needs at least one option before opening'); return; }
+        let ok = 0;
+        for (const m of members) {
+            if (m.status === status) { ok++; continue; }
+            if (await saveFormObject({ ...gatherForm(m.id, false), status }, null)) ok++;
+        }
+        showToast(`${ok} of ${members.length} forms ${status === 'open' ? 'open for voting' : 'closed'}`);
+        renderResults();
+    }
 
     async function refreshResults() {
         const f = activeForm();
@@ -1110,11 +1171,21 @@
         document.getElementById('resTitle').innerText = combined ? f.group_name.trim() : f.name;
         document.getElementById('resScope').style.display = group.length > 1 ? '' : 'none';
         document.getElementById('resScope').innerHTML = group.length > 1
-            ? `<button class="${combined ? 'on' : ''}" onclick="setResultsScope(true)">Combined</button><button class="${combined ? '' : 'on'}" onclick="setResultsScope(false)">${escapeHtml(f.name)} only</button>` : '';
-        document.getElementById('resStatusSeg').innerHTML = ['closed', 'open', 'auto'].map(st =>
-            `<button class="${f.status === st ? 'on' : ''}" onclick="setFormStatus('${f.id}', '${st}')">${{ closed: 'Closed', open: 'Open', auto: 'Scheduled' }[st]}</button>`).join('');
-        document.getElementById('resStatusSeg').title = `Voting status of ${f.name}`;
-        document.getElementById('resStateBadge').innerHTML = combined ? '' : stateBadge(f);
+            ? `<button class="${combined ? 'on' : ''}" onclick="setResultsScope(true)">All combined</button>` +
+              group.map(g => `<button class="${!combined && g.id === f.id ? 'on' : ''}" onclick="selectScopeForm('${escapeHtml(g.id)}')">${escapeHtml(g.name)}</button>`).join('') : '';
+        if (combined) {
+            const all = st => group.every(g => g.status === st);
+            document.getElementById('resStatusSeg').innerHTML = ['closed', 'open'].map(st =>
+                `<button class="${all(st) ? 'on' : ''}" onclick="setGroupStatus('${st}')">${st === 'open' ? 'Open all' : 'Close all'}</button>`).join('');
+            document.getElementById('resStatusSeg').title = `Voting status of every form in ${f.group_name.trim()}`;
+            const open = group.filter(g => localState(g) === 'open').length;
+            document.getElementById('resStateBadge').innerHTML = `<span class="status-badge ${open ? 'sent' : 'na'}">${open} of ${group.length} open</span>`;
+        } else {
+            document.getElementById('resStatusSeg').innerHTML = ['closed', 'open', 'auto'].map(st =>
+                `<button class="${f.status === st ? 'on' : ''}" onclick="setFormStatus('${f.id}', '${st}')">${{ closed: 'Closed', open: 'Open', auto: 'Scheduled' }[st]}</button>`).join('');
+            document.getElementById('resStatusSeg').title = `Voting status of ${f.name}`;
+            document.getElementById('resStateBadge').innerHTML = stateBadge(f);
+        }
 
         const ballots = r ? r.ballots : (combined ? group.reduce((n, x) => n + (x.ballots || 0), 0) : f.ballots || 0);
         document.getElementById('resBallots').innerText = Number(ballots).toLocaleString();
@@ -1126,8 +1197,10 @@
         const colorOf = id => FORM_COLORS[Math.max(0, scope.findIndex(x => x.form_id === id)) % FORM_COLORS.length];
         const rows = combined
             ? scope.map(x => ({ label: x.name, sub: METHOD_LABELS[x.voter_check] + (x.state === 'open' ? ' · open' : ''), n: x.ballots, color: colorOf(x.form_id) }))
-            : (() => { const m = scope[0]?.manual_ballots || 0; return [
-                { label: 'Online', sub: METHOD_LABELS[f.voter_check], n: ballots - m, color: FORM_COLORS[0] },
+            : (() => { const m = scope[0]?.manual_ballots || 0, t = scope[0]?.sms_ballots || 0; return [
+                f.voter_check === 'sms'
+                    ? { label: 'Text messages', sub: 'Poll Everywhere', n: t, color: FORM_COLORS[0] }
+                    : { label: 'Online', sub: METHOD_LABELS[f.voter_check], n: ballots - m - t, color: FORM_COLORS[0] },
                 { label: 'Manual / paper', sub: '', n: m, color: FORM_COLORS[1] }]; })();
         document.getElementById('resBreakdown').innerHTML = rows.map(x => `
             <div class="bd-row">
@@ -1167,21 +1240,41 @@
         document.getElementById('recentFeed').innerHTML = recent.length ? recent.map(v => `
             <div class="feed-row">
                 <div class="who"><b>${escapeHtml(voterLabel(v.voter_id))}</b> <span style="color:var(--text-dim);">→</span> ${escapeHtml(v.candidate_name || '')}</div>
-                <div class="when">${combined ? `<span class="group-tag" style="margin-right:6px;">${escapeHtml(formName(v.form_id))}</span>` : v.method !== 'WEB' ? '<span class="group-tag" style="margin-right:6px;">Manual</span>' : ''}${fmtTime(v.created_at)}</div>
+                <div class="when">${combined ? `<span class="group-tag" style="margin-right:6px;">${escapeHtml(formName(v.form_id))}</span>` : v.method !== 'WEB' ? `<span class="group-tag" style="margin-right:6px;">${v.method === 'SMS' ? 'Text' : 'Manual'}</span>` : ''}${fmtTime(v.created_at)}</div>
             </div>`).join('') : '<div class="empty-note">Waiting for votes…</div>';
         document.getElementById('resUpdated').innerText = r ? 'Updated ' + fmtTime(new Date().toISOString()) : '';
 
-        document.getElementById('manualFormName').innerText = f.name;
-        const sel = document.getElementById('manualCand');
-        const prev = sel.value;
-        sel.innerHTML = (f.candidates || []).map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('') || '<option value="">No options yet</option>';
-        if ((f.candidates || []).some(c => c.id === prev)) sel.value = prev;
+        const smsForms = (combined ? group : [f]).filter(g => g.voter_check === 'sms');
+        document.getElementById('smsCard').style.display = smsForms.length ? '' : 'none';
+        document.getElementById('smsCardButtons').innerHTML = smsForms.map(g =>
+            `<button class="btn-action" onclick="openSmsImport('${escapeHtml(g.id)}')">Import CSV${smsForms.length > 1 ? ' into ' + escapeHtml(g.name) : ''}</button>`).join('');
+
+        const mf = document.getElementById('manualForm');
+        const prevForm = mf.value;
+        mf.style.display = combined ? '' : 'none';
+        mf.innerHTML = group.map(g => `<option value="${escapeHtml(g.id)}">Add to ${escapeHtml(g.name)}</option>`).join('');
+        mf.value = combined && group.some(g => g.id === prevForm) ? prevForm : f.id;
+        renderManualCands();
 
         renderSideCard();
     }
 
+    function manualTargetForm() {
+        const mf = document.getElementById('manualForm');
+        return (mf.style.display !== 'none' && forms.find(x => x.id === mf.value)) || activeForm();
+    }
+    function renderManualCands() {
+        const f = manualTargetForm();
+        document.getElementById('manualFormName').innerText = f ? f.name : '';
+        const sel = document.getElementById('manualCand');
+        const prev = sel.selectedOptions[0]?.text;
+        sel.innerHTML = (f?.candidates || []).map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('') || '<option value="">No options yet</option>';
+        const same = (f?.candidates || []).find(c => c.name === prev);
+        if (same) sel.value = same.id;
+    }
+
     async function manualVotes(sign) {
-        const f = activeForm();
+        const f = manualTargetForm();
         const cand = document.getElementById('manualCand').value;
         const count = parseInt(document.getElementById('manualCount').value, 10);
         if (!f || !cand) return;
@@ -1218,11 +1311,13 @@
     async function resetVotes() {
         const f = activeForm();
         if (!f) return;
-        const typed = prompt(`This permanently deletes every vote on "${f.name}".\n\nType RESET to confirm.`);
+        const members = showCombined(f) ? groupForms(f) : [f];
+        const what = members.length > 1 ? `all ${members.length} forms in "${f.group_name.trim()}" (${members.map(m => m.name).join(', ')})` : `"${f.name}"`;
+        const typed = prompt(`This permanently deletes every vote on ${what}.\n\nType RESET to confirm.`);
         if (typed === null) return;
         if (typed.trim().toUpperCase() !== 'RESET') { showToast('Not reset — you didn\'t type RESET'); return; }
         try {
-            await rpc('voting_reset', { p_form_id: f.id });
+            for (const m of members) await rpc('voting_reset', { p_form_id: m.id });
             showToast('All votes deleted');
             results = null;
             refreshResults();
@@ -1273,7 +1368,8 @@
         ['any', 'Any ID (once each)'],
         ['email', 'Email address (once each) — e.g. online viewers'],
         ['guest_list', 'Email on the VIP Check In guest list for the event'],
-        ['open', 'No ID — one vote per phone']
+        ['open', 'No ID — one vote per phone'],
+        ['sms', 'Text message — import from Poll Everywhere']
     ];
     function voterCheckOptions(selected) {
         return VOTER_CHECK_OPTIONS.map(([v, l]) => `<option value="${v}" ${v === (selected || 'roster') ? 'selected' : ''}>${l}</option>`).join('');
@@ -1350,7 +1446,7 @@
             <div class="setup-card" id="card-${id}">
                 <div class="fc-head">
                     <div>
-                        <h3>${escapeHtml(f.name)}${f.id === activeFormId ? ' <span class="status-badge draft" style="vertical-align:middle;">Active</span>' : ''}</h3>
+                        <h3>${escapeHtml(f.name)}${f.id === activeFormId || (resultsCombined && activeForm() && groupKey(f.group_name) && groupKey(f.group_name) === groupKey(activeForm().group_name)) ? ' <span class="status-badge draft" style="vertical-align:middle;">Active</span>' : ''}</h3>
                         <div class="fc-meta">${stateBadge(f)}<span>${plural(f.ballots || 0, 'vote')}</span><span>· ${plural(cands.length, 'option')}</span>${f.max_choices > 1 ? `<span>· pick ${f.max_choices}</span>` : ''}<span>· ${escapeHtml(METHOD_LABELS[f.voter_check] || '')}${f.access_code ? ' + code' : ''}</span>${f.group_name ? `<span class="group-tag" title="Results combine with every form in this group">Results: ${escapeHtml(f.group_name)}</span>` : ''}${ev ? `<span class="group-tag">${escapeHtml(ev)}</span>` : ''}${f.voter_check === 'guest_list' && !f.event_id ? '<span class="status-badge draft">Pick an event for the guest list</span>' : ''}</div>
                     </div>
                     <div class="seg">${seg}</div>
@@ -1359,13 +1455,19 @@
                     <div><label class="stat-label">Opens</label><input type="datetime-local" class="modern-input" ${fid('opens_at')} value="${isoToLocalInput(f.opens_at)}" onchange="saveFormDates('${id}')"></div>
                     <div><label class="stat-label">Closes</label><input type="datetime-local" class="modern-input" ${fid('closes_at')} value="${isoToLocalInput(f.closes_at)}" onchange="saveFormDates('${id}')"></div>
                 </div>
+                ${f.voter_check === 'sms' ? `
+                <div class="fc-link-box" style="align-items:center; justify-content:space-between; flex-wrap:wrap;">
+                    <span style="color:var(--text-muted); font-size:13px;">Votes come in by text through Poll Everywhere. Upload its CSV export — upload a newer one anytime, numbers already counted are skipped.</span>
+                    <button class="btn-action" style="flex-shrink:0;" onclick="openSmsImport('${id}')">Import Poll Everywhere CSV</button>
+                </div>
+                <div class="fc-actions">` : `
                 <div class="fc-link-box">
                     <input class="modern-input" value="${escapeHtml(link)}" readonly onclick="this.select()">
                     <button class="btn-action secondary" style="flex-shrink:0;" onclick="copyText('${escapeHtml(link)}', 'Voting link copied')">Copy link</button>
                 </div>
                 <div class="fc-actions">
                     <a class="fb-pill" href="${escapeHtml(link)}" target="_blank" rel="noopener" style="text-decoration:none;">Preview ↗</a>
-                    <a class="fb-pill" href="${escapeHtml(qrLink(f.slug))}" target="_blank" rel="noopener" style="text-decoration:none;">QR code ↗</a>
+                    <a class="fb-pill" href="${escapeHtml(qrLink(f.slug))}" target="_blank" rel="noopener" style="text-decoration:none;">QR code ↗</a>`}
                     <button class="fb-pill" onclick="viewResults('${id}')">Live results</button>
                     <button class="fb-pill" onclick="duplicateForm('${id}')">Duplicate</button>
                 </div>
@@ -1511,7 +1613,7 @@
         saveForm(id, 'Schedule saved');
     }
 
-    function viewResults(id) { setActiveForm(id); toggleView('results'); }
+    function viewResults(id) { resultsCombined = true; setActiveForm(id); toggleView('results'); }
 
     async function duplicateForm(id) {
         const src = gatherForm(id);
@@ -1623,10 +1725,171 @@
             }
         }
         closeNewForm();
+        resultsCombined = true;
         setActiveForm(saved.id);
         toggleView('forms');
         const details = document.querySelector(`details[data-id="${saved.id}"]`);
         if (details) { details.open = true; document.getElementById(`card-${saved.id}`).scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    }
+
+    // ── Poll Everywhere text votes (CSV import) ─────────────────
+    let sms = { formId: null, rows: [], cols: {}, map: {}, header: [] };
+
+    function openSmsImport(formId) {
+        const f = forms.find(x => x.id === formId);
+        if (!f) return;
+        if (!(f.candidates || []).length) { showToast('Add the performers to this form first'); return; }
+        sms = { formId, rows: [], cols: {}, map: {}, header: [] };
+        document.getElementById('smsFormName').innerText = f.name;
+        document.getElementById('smsFileName').innerText = '';
+        document.getElementById('smsBody').innerHTML = '';
+        document.getElementById('smsModal').style.display = 'flex';
+        document.body.classList.add('modal-open');
+    }
+    function closeSmsImport() {
+        document.getElementById('smsModal').style.display = 'none';
+        document.body.classList.remove('modal-open');
+    }
+
+    // Small CSV reader: quoted fields, commas and line breaks inside quotes
+    function parseCsv(text) {
+        const rows = []; let row = [], cell = '', q = false;
+        text = String(text).replace(/^﻿/, '');
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            if (q) {
+                if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+                else cell += ch;
+            } else if (ch === '"') q = true;
+            else if (ch === ',') { row.push(cell); cell = ''; }
+            else if (ch === '\n' || ch === '\r') {
+                if (ch === '\r' && text[i + 1] === '\n') i++;
+                row.push(cell); cell = '';
+                if (row.some(c => c.trim() !== '')) rows.push(row);
+                row = [];
+            } else cell += ch;
+        }
+        row.push(cell);
+        if (row.some(c => c.trim() !== '')) rows.push(row);
+        return rows;
+    }
+
+    function loadSmsFile(file) {
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+            const all = parseCsv(reader.result);
+            if (!all.length) { showToast('That file is empty'); return; }
+            const head = all[0].map(h => h.trim());
+            const find = re => head.findIndex(h => re.test(h));
+            const cols = {
+                response: find(/^(response|value|answer|vote|choice)/i),
+                phone: find(/phone|sender|^from$|mobile/i),
+                source: find(/^(via|source|response (method|source)|channel|method)/i),
+                time: find(/received|created|timestamp|^time|date/i)
+            };
+            const hasHeader = cols.response >= 0 || cols.phone >= 0;
+            // Older Poll Everywhere layout used by the previous GGT admin: A = response, B = source, E = phone
+            if (!hasHeader) Object.assign(cols, { response: 0, source: 1, phone: 4 });
+            sms.header = hasHeader ? head : head.map((_, i) => 'Column ' + String.fromCharCode(65 + i));
+            sms.rows = hasHeader ? all.slice(1) : all;
+            sms.cols = { response: Math.max(cols.response, 0), phone: Math.max(cols.phone, 0), source: cols.source, time: hasHeader ? cols.time : -1 };
+            sms.map = {};
+            document.getElementById('smsFileName').innerText = `${file.name} · ${sms.rows.length.toLocaleString()} rows`;
+            renderSmsBody();
+        };
+        reader.readAsText(file);
+    }
+
+    function smsGuess(f, value) {
+        const v = nameKey(value).replace(/[^a-z0-9 ]/g, '').trim();
+        if (!v) return '';
+        const cands = f.candidates || [];
+        const plain = c => nameKey(c.name).replace(/[^a-z0-9 ]/g, '').trim();
+        let hit = cands.find(c => plain(c) === v)
+            || cands.find(c => plain(c).length >= 3 && (v.includes(plain(c)) || (v.length >= 3 && plain(c).includes(v))));
+        if (!hit && /^\d{1,2}$/.test(v)) hit = cands[parseInt(v, 10) - 1];
+        if (!hit && /^[a-z]$/.test(v)) hit = cands[v.charCodeAt(0) - 97];
+        return hit ? hit.id : '';
+    }
+
+    function smsTextRows() {
+        const { rows, cols } = sms;
+        const onlyText = document.getElementById('smsOnlyText')?.checked !== false;
+        return rows.filter(r => !(onlyText && cols.source >= 0 && cols.source !== '' && !/text|sms/i.test(r[cols.source] || '')));
+    }
+
+    function renderSmsBody() {
+        const f = forms.find(x => x.id === sms.formId);
+        const colSelect = (key, allowNone) => `<select class="modern-input" onchange="sms.cols.${key} = this.value === '' ? -1 : +this.value; renderSmsBody()">` +
+            (allowNone ? `<option value="" ${sms.cols[key] < 0 ? 'selected' : ''}>(none)</option>` : '') +
+            sms.header.map((h, i) => `<option value="${i}" ${sms.cols[key] === i ? 'selected' : ''}>${escapeHtml(h || 'Column ' + (i + 1))}</option>`).join('') + '</select>';
+        const onlyTextChecked = document.getElementById('smsOnlyText') ? document.getElementById('smsOnlyText').checked : true;
+        const rows = smsTextRows();
+        const counts = new Map();
+        rows.forEach(r => { const v = (r[sms.cols.response] || '').trim(); if (v) counts.set(v, (counts.get(v) || 0) + 1); });
+        [...counts.keys()].forEach(v => { if (!(v in sms.map)) sms.map[v] = smsGuess(f, v); });
+        const values = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+        const phoneOk = r => { const d = (r[sms.cols.phone] || '').replace(/\D/g, ''); return d.length >= 7 && d.length <= 15; };
+        const ready = rows.filter(r => phoneOk(r) && sms.map[(r[sms.cols.response] || '').trim()]);
+        const noPhone = rows.filter(r => !phoneOk(r)).length;
+        const phones = new Set(ready.map(r => (r[sms.cols.phone] || '').replace(/\D/g, '').replace(/^1(\d{10})$/, '$1')));
+        document.getElementById('smsBody').innerHTML = `
+            <div class="form-grid" style="grid-template-columns:1fr 1fr 1fr; margin-bottom:12px;">
+                <div><label class="stat-label">Answer column</label>${colSelect('response')}</div>
+                <div><label class="stat-label">Phone column</label>${colSelect('phone')}</div>
+                <div><label class="stat-label">Source column</label>${colSelect('source', true)}</div>
+            </div>
+            ${sms.cols.source >= 0 ? `<label class="check-row" style="margin-bottom:18px;"><input type="checkbox" id="smsOnlyText" ${onlyTextChecked ? 'checked' : ''} onchange="renderSmsBody()"> Only count text messages (source says "Text" or "SMS")</label>` : ''}
+            <div class="section-header" style="margin-top:6px;">Match each answer to a performer</div>
+            <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:18px; max-height:300px; overflow-y:auto;">
+                ${values.map(([v, n]) => `
+                    <div style="display:grid; grid-template-columns: minmax(0,1fr) 70px minmax(0,1fr); gap:10px; align-items:center;">
+                        <div style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(v)}">“${escapeHtml(v)}”</div>
+                        <div style="color:var(--text-dim); font-size:12px; text-align:right;">${n.toLocaleString()} text${n === 1 ? '' : 's'}</div>
+                        <select class="modern-input" onchange="sms.map[${escapeHtml(JSON.stringify(v))}] = this.value; renderSmsBody()">
+                            <option value="">Don't count</option>
+                            ${(f.candidates || []).map(c => `<option value="${escapeHtml(c.id)}" ${sms.map[v] === c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}
+                        </select>
+                    </div>`).join('') || '<div class="empty-note">No answers found in that column.</div>'}
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+                <span style="color:var(--text-muted); font-size:13px;"><b style="color:#fff;">${ready.length.toLocaleString()}</b> texts from ${phones.size.toLocaleString()} phone numbers ready${noPhone ? ` · ${noPhone.toLocaleString()} without a phone number (skipped)` : ''}</span>
+                <button class="btn-action" id="smsImportBtn" onclick="runSmsImport()" ${ready.length ? '' : 'disabled'}>Import votes</button>
+            </div>
+            ${noPhone && noPhone === rows.length ? '<p class="hint" style="margin:12px 0 0; color:var(--warning-text);">No phone numbers found. Pick the right Phone column, or turn on phone numbers in the Poll Everywhere export so each phone can only count once.</p>' : ''}
+            <div class="result-box" id="smsResult"></div>`;
+    }
+
+    async function runSmsImport() {
+        const f = forms.find(x => x.id === sms.formId);
+        // Oldest first, so a phone that texted twice keeps its first answer
+        const t = sms.cols.time;
+        const when = r => { const d = Date.parse(r[t] || ''); return isNaN(d) ? Infinity : d; };
+        const ordered = t >= 0 ? smsTextRows().slice().sort((a, b) => when(a) - when(b)) : smsTextRows();
+        const payload = ordered
+            .map(r => ({ phone: (r[sms.cols.phone] || '').trim(), candidate_id: sms.map[(r[sms.cols.response] || '').trim()] }))
+            .filter(x => x.candidate_id);
+        const btn = document.getElementById('smsImportBtn');
+        btn.disabled = true;
+        const total = { added: 0, duplicates: 0, skipped: 0 };
+        try {
+            for (let i = 0; i < payload.length; i += 2000) {
+                setLoading(true, `IMPORTING ${Math.min(i + 2000, payload.length).toLocaleString()} / ${payload.length.toLocaleString()}`);
+                const r = await rpc('voting_import_sms', { p_form_id: f.id, p_rows: payload.slice(i, i + 2000) });
+                total.added += r.added; total.duplicates += r.duplicates; total.skipped += r.skipped;
+            }
+            document.getElementById('smsResult').innerHTML = `<span style="color:var(--success-text); font-weight:600;">${plural(total.added, 'new vote')} added</span> · ${total.duplicates.toLocaleString()} already counted (same phone) · ${total.skipped.toLocaleString()} skipped`;
+            showToast(`${plural(total.added, 'text vote')} imported into ${f.name}`);
+            results = null;
+            if (currentView === 'results') refreshResults();
+            refreshFormsQuietly();
+        } catch (e) {
+            console.error(e);
+            document.getElementById('smsResult').innerHTML = `<span style="color:var(--danger-text);">Import stopped: ${escapeHtml(e.message || 'error')}. ${plural(total.added, 'vote')} were added before that; uploading again is safe.</span>`;
+        }
+        setLoading(false);
+        btn.disabled = false;
     }
 
     // ── student ID list ────────────────────────────────────────
@@ -1738,7 +2001,7 @@
     }
 
     // ── start ──────────────────────────────────────────────────
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNewForm(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeNewForm(); closeSmsImport(); } });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && currentView === 'results' && TOKEN) refreshResults(); });
 
     window.onload = async () => {

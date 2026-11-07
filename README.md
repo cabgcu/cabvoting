@@ -28,9 +28,18 @@ Make one form per way of voting, and give them all the same **Results group** (e
 
 Quickest way: **New voting form** → pick the voting method → **Copy performers from** your first form. That fills in the same performers and puts both forms in one results group.
 
-Live Results then shows the combined total, a breakdown by form, and each performer's votes split by form (switch to "only this form" any time). Performers are matched by name. A Student ID or email can vote once across the whole group. The CSV export includes the per-form columns.
+The **Active event / form** picker lists each group once (e.g. "GGT 2026 · 3 forms"). Live Results then shows the combined total, a breakdown by form, and each performer's votes split by form (tap a form name to see it alone). Performers are matched by name. A Student ID or email can vote once across the whole group. "Open all" / "Close all" and Reset apply to every form in the group, and manual votes ask which form they go to. The CSV export includes the per-form columns.
 
 Other options: "Any ID (once each)" and "No ID — one vote per phone". Any form can require an access code.
+
+### Text votes from Poll Everywhere
+
+Poll Everywhere no longer has a public API, so text votes come in from its CSV export:
+
+1. Make a form (e.g. **GGT Text**) with "Who can vote" set to **Text message — import from Poll Everywhere**, copying performers from your first form so it joins the same results group.
+2. In Poll Everywhere, download the poll's responses as a CSV, with phone numbers included.
+3. In Live Results (or on the form's card) click **Import CSV**. The admin finds the answer, phone and source columns, matches each answer to a performer (change any that are wrong), and counts one vote per phone number. A phone's first text is the one that counts.
+4. Upload a newer export as often as you like during the show. Phone numbers already counted are skipped, so only new texts are added.
 
 ## How it's protected
 
