@@ -14,8 +14,8 @@
 -- Security: every voting table has Row Level Security ON with no
 -- policies, so the publishable key can't read or change them directly.
 -- Everything goes through the functions below:
---   * public functions (voting_form_public, voting_check_voter, cast_vote)
---     only show a form and accept one ballot per student ID
+--   * public functions (voting_form_public, cast_vote) only show a form
+--     and accept one ballot per person
 --   * admin functions need a session token from voting_admin_login,
 --     which only the staff password can get
 -- ============================================================
@@ -37,7 +37,7 @@ create table if not exists public.voting_forms (
     status           text        not null default 'closed',          -- 'closed' | 'open' | 'auto'
     opens_at         timestamptz,
     closes_at        timestamptz,
-    voter_check      text        not null default 'roster',          -- 'roster' = ID must be on the student ID list | 'any'
+    voter_check      text        not null default 'roster',          -- who can vote, see voter_check below
     id_label         text        not null default 'Student ID',
     max_choices      integer     not null default 1,                 -- picks per ballot
     candidates       jsonb       not null default '[]'::jsonb,       -- [{ id, name, subtitle, image_url }]
@@ -46,6 +46,18 @@ create table if not exists public.voting_forms (
     created_at       timestamptz not null default now(),
     updated_at       timestamptz not null default now()
 );
+
+-- Added later (no-ops if they already exist)
+--   group_name:  forms with the same group (e.g. "GGT 2026") combine into one result,
+--                and one ID / email can only vote once across the whole group
+--   access_code: optional code voters must enter (e.g. given to VIPs or shown on the stream)
+--   voter_check: 'roster'     = Student ID on the Student ID list
+--                'any'        = any ID, once each
+--                'email'      = any email address, once each
+--                'guest_list' = email on the VIP Check In guest list of the form's event
+--                'open'       = no ID, one vote per phone
+alter table public.voting_forms add column if not exists group_name  text;
+alter table public.voting_forms add column if not exists access_code text;
 
 -- One row per pick. A ballot with 3 picks = 3 rows sharing a ballot_id.
 create table if not exists public.voting_votes (
@@ -63,6 +75,8 @@ create index if not exists voting_votes_ballot_idx on public.voting_votes (ballo
 -- Backstop: the same ID can never pick the same performer twice on one form
 create unique index if not exists voting_votes_voter_uniq
     on public.voting_votes (form_id, voter_id, candidate_id) where voter_id is not null;
+-- "Has this person voted anywhere in the group?"
+create index if not exists voting_votes_voter_idx on public.voting_votes (voter_id) where voter_id is not null;
 
 -- Student IDs allowed to vote (shared by every form that checks the list)
 create table if not exists public.voting_roster (
@@ -103,6 +117,26 @@ returns text language sql stable as $$
         else 'open'
     end
 $$;
+
+-- Group names match ignoring case and spaces at the ends; blank = not grouped
+create or replace function public.voting_group_key(p text)
+returns text language sql immutable as $$
+    select nullif(lower(btrim(coalesce(p, ''))), '')
+$$;
+
+-- The forms whose votes count together: the form itself, plus (when p_combined)
+-- every form in its results group
+create or replace function public.voting_scope(p_form_id uuid, p_combined boolean)
+returns uuid[] language sql stable security definer set search_path = public as $$
+    select coalesce(array_agg(g.id), array[p_form_id])
+      from public.voting_forms f
+      join public.voting_forms g
+        on g.id = f.id
+        or (p_combined and public.voting_group_key(f.group_name) is not null
+            and public.voting_group_key(g.group_name) = public.voting_group_key(f.group_name))
+     where f.id = p_form_id
+$$;
+revoke all on function public.voting_scope(uuid, boolean) from public, anon, authenticated;
 
 create or replace function public.voting_token_hash(p_token text)
 returns text language sql immutable set search_path = public, extensions as $$
@@ -205,7 +239,10 @@ begin
         status          = case when p_form->>'status' in ('open', 'closed', 'auto') then p_form->>'status' else 'closed' end,
         opens_at        = nullif(p_form->>'opens_at', '')::timestamptz,
         closes_at       = nullif(p_form->>'closes_at', '')::timestamptz,
-        voter_check     = case when p_form->>'voter_check' = 'any' then 'any' else 'roster' end,
+        voter_check     = case when p_form->>'voter_check' in ('roster', 'any', 'email', 'guest_list', 'open')
+                               then p_form->>'voter_check' else 'roster' end,
+        group_name      = nullif(btrim(coalesce(p_form->>'group_name', '')), ''),
+        access_code     = nullif(btrim(coalesce(p_form->>'access_code', '')), ''),
         id_label        = coalesce(nullif(btrim(p_form->>'id_label'), ''), 'Student ID'),
         max_choices     = greatest(1, least(coalesce(nullif(p_form->>'max_choices', '')::int, 1), 50)),
         candidates      = coalesce(p_form->'candidates', '[]'::jsonb),
@@ -234,40 +271,61 @@ end $$;
 
 -- ── 5. Admin: results & vote management ──────────────────────
 
-create or replace function public.voting_results(p_token text, p_form_id uuid)
+-- The old one-form versions (replaced by the ones below, which can combine a group)
+drop function if exists public.voting_results(text, uuid);
+drop function if exists public.voting_export(text, uuid);
+
+-- Results for one form, or (p_combined) every form in its results group.
+-- by_candidate is per form; the admin page adds performers up by name.
+create or replace function public.voting_results(p_token text, p_form_id uuid, p_combined boolean default false)
 returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+    v_ids uuid[];
 begin
     perform public.voting_admin_check(p_token);
+    v_ids := public.voting_scope(p_form_id, p_combined);
     return jsonb_build_object(
-        'ballots',        (select count(distinct ballot_id) from public.voting_votes where form_id = p_form_id),
-        'web_ballots',    (select count(distinct ballot_id) from public.voting_votes where form_id = p_form_id and method = 'WEB'),
-        'manual_ballots', (select count(distinct ballot_id) from public.voting_votes where form_id = p_form_id and method <> 'WEB'),
-        'picks',          (select count(*) from public.voting_votes where form_id = p_form_id),
-        'last_hour',      (select count(distinct ballot_id) from public.voting_votes where form_id = p_form_id and created_at >= now() - interval '1 hour'),
+        'ballots',   (select count(distinct ballot_id) from public.voting_votes where form_id = any(v_ids)),
+        'picks',     (select count(*) from public.voting_votes where form_id = any(v_ids)),
+        'last_hour', (select count(distinct ballot_id) from public.voting_votes where form_id = any(v_ids) and created_at >= now() - interval '1 hour'),
+        'forms', coalesce((
+            select jsonb_agg(jsonb_build_object(
+                       'form_id', f.id, 'name', f.name, 'voter_check', f.voter_check, 'state', public.voting_form_state(f),
+                       'ballots', coalesce(t.ballots, 0), 'manual_ballots', coalesce(t.manual, 0), 'last_hour', coalesce(t.last_hour, 0))
+                   order by f.created_at)
+              from public.voting_forms f
+              left join (select form_id, count(distinct ballot_id) as ballots,
+                                count(distinct ballot_id) filter (where method <> 'WEB') as manual,
+                                count(distinct ballot_id) filter (where created_at >= now() - interval '1 hour') as last_hour
+                           from public.voting_votes where form_id = any(v_ids) group by form_id) t on t.form_id = f.id
+             where f.id = any(v_ids)), '[]'::jsonb),
         'by_candidate', coalesce((
-            select jsonb_agg(jsonb_build_object('candidate_id', candidate_id, 'name', name, 'count', n, 'web', web, 'manual', manual))
-              from (select candidate_id, max(candidate_name) as name, count(*) as n,
-                           count(*) filter (where method = 'WEB') as web,
+            select jsonb_agg(jsonb_build_object('form_id', form_id, 'candidate_id', candidate_id, 'name', name, 'count', n, 'manual', manual))
+              from (select form_id, candidate_id, max(candidate_name) as name, count(*) as n,
                            count(*) filter (where method <> 'WEB') as manual
-                      from public.voting_votes where form_id = p_form_id
-                     group by candidate_id) t), '[]'::jsonb),
+                      from public.voting_votes where form_id = any(v_ids)
+                     group by form_id, candidate_id) t), '[]'::jsonb),
         'recent', coalesce((
             select jsonb_agg(to_jsonb(r) order by r.created_at desc)
-              from (select voter_id, candidate_name, method, created_at
-                      from public.voting_votes where form_id = p_form_id
+              from (select form_id, voter_id, candidate_name, method, created_at
+                      from public.voting_votes where form_id = any(v_ids)
                      order by created_at desc limit 15) r), '[]'::jsonb),
         'server_now', now());
 end $$;
 
-create or replace function public.voting_export(p_token text, p_form_id uuid)
+create or replace function public.voting_export(p_token text, p_form_id uuid, p_combined boolean default false)
 returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+    v_ids uuid[];
 begin
     perform public.voting_admin_check(p_token);
+    v_ids := public.voting_scope(p_form_id, p_combined);
     return coalesce((
-        select jsonb_agg(jsonb_build_object('ballot_id', ballot_id, 'voter_id', voter_id, 'candidate_id', candidate_id,
-                                            'candidate_name', candidate_name, 'method', method, 'created_at', created_at)
-                         order by created_at)
-          from public.voting_votes where form_id = p_form_id), '[]'::jsonb);
+        select jsonb_agg(jsonb_build_object('form', f.name, 'ballot_id', v.ballot_id, 'voter_id', v.voter_id, 'candidate_id', v.candidate_id,
+                                            'candidate_name', v.candidate_name, 'method', v.method, 'created_at', v.created_at)
+                         order by v.created_at)
+          from public.voting_votes v join public.voting_forms f on f.id = v.form_id
+         where v.form_id = any(v_ids)), '[]'::jsonb);
 end $$;
 
 -- Paper ballots / judges' votes: add p_count votes for one performer
@@ -307,14 +365,16 @@ begin
     return v_n;
 end $$;
 
--- Remove one student's ballot so they can vote again
+-- Remove one person's ballot (anywhere in the form's group) so they can vote again
 create or replace function public.voting_clear_voter(p_token text, p_form_id uuid, p_voter text)
 returns integer language plpgsql security definer set search_path = public as $$
 declare
     v_n integer;
 begin
     perform public.voting_admin_check(p_token);
-    delete from public.voting_votes where form_id = p_form_id and voter_id = public.voting_norm_id(p_voter);
+    delete from public.voting_votes
+     where form_id = any(public.voting_scope(p_form_id, true))
+       and voter_id in (public.voting_norm_id(p_voter), lower(btrim(coalesce(p_voter, ''))));
     get diagnostics v_n = row_count;
     return v_n;
 end $$;
@@ -402,7 +462,8 @@ begin
     return jsonb_build_object(
         'state', public.voting_form_state(f),
         'title', coalesce(f.title, f.name), 'intro', f.intro, 'banner_url', f.banner_url,
-        'event_name', v_event, 'id_label', f.id_label, 'max_choices', f.max_choices,
+        'event_name', v_event, 'voter_check', f.voter_check, 'id_label', f.id_label,
+        'needs_code', f.access_code is not null, 'max_choices', f.max_choices,
         'candidates', (select coalesce(jsonb_agg(jsonb_build_object(
                            'id', c->>'id', 'name', c->>'name', 'subtitle', c->>'subtitle', 'image_url', c->>'image_url')), '[]'::jsonb)
                          from jsonb_array_elements(f.candidates) c),
@@ -410,37 +471,20 @@ begin
         'opens_at', f.opens_at, 'closes_at', f.closes_at);
 end $$;
 
--- Step 1 on the page: is this ID allowed to vote, and has it voted already?
-create or replace function public.voting_check_voter(p_slug text, p_voter text)
-returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare
-    f    public.voting_forms;
-    v_id text := public.voting_norm_id(p_voter);
-begin
-    select * into f from public.voting_forms where slug = lower(btrim(coalesce(p_slug, '')));
-    if not found or public.voting_form_state(f) <> 'open' then
-        return jsonb_build_object('ok', false, 'error', 'closed');
-    end if;
-    if v_id = '' or length(v_id) > 40 then
-        return jsonb_build_object('ok', false, 'error', 'id');
-    end if;
-    if f.voter_check = 'roster' and not exists (select 1 from public.voting_roster where student_id = v_id) then
-        return jsonb_build_object('ok', false, 'error', 'not_on_list');
-    end if;
-    if exists (select 1 from public.voting_votes where form_id = f.id and voter_id = v_id) then
-        return jsonb_build_object('ok', false, 'error', 'already');
-    end if;
-    return jsonb_build_object('ok', true);
-end $$;
+-- Older versions the page no longer uses
+drop function if exists public.voting_check_voter(text, text);
+drop function if exists public.cast_vote(text, text, jsonb);
 
--- Step 2: cast the ballot. Everything is checked again here, under a
--- per-student lock, so one ID can only ever vote once per form.
+-- Cast a ballot. Everything is checked here, under a per-person lock, so one
+-- Student ID / email / phone can only ever vote once across the form's results group.
+-- p_voter: Student ID, email, or 'device:<random id>' depending on the form
 -- p_choices: ["<candidate id>", ...] — 1 up to the form's max_choices
-create or replace function public.cast_vote(p_slug text, p_voter text, p_choices jsonb)
+create or replace function public.cast_vote(p_slug text, p_voter text, p_choices jsonb, p_code text default null)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
     f        public.voting_forms;
-    v_id     text := public.voting_norm_id(p_voter);
+    v_id     text;
+    v_group  text;
     v_ballot uuid := gen_random_uuid();
     v_n      integer;
 begin
@@ -448,16 +492,39 @@ begin
     if not found or public.voting_form_state(f) <> 'open' then
         return jsonb_build_object('ok', false, 'error', 'closed');
     end if;
-    if v_id = '' or length(v_id) > 40 then
-        return jsonb_build_object('ok', false, 'error', 'id');
+    if f.access_code is not null and lower(btrim(coalesce(p_code, ''))) <> lower(btrim(f.access_code)) then
+        return jsonb_build_object('ok', false, 'error', 'code');
     end if;
-    if f.voter_check = 'roster' and not exists (select 1 from public.voting_roster where student_id = v_id) then
-        return jsonb_build_object('ok', false, 'error', 'not_on_list');
+
+    -- Who is voting
+    if f.voter_check = 'open' then
+        v_id := lower(btrim(coalesce(p_voter, '')));
+        if v_id !~ '^device:[a-z0-9-]{8,64}$' then
+            return jsonb_build_object('ok', false, 'error', 'id');
+        end if;
+    elsif f.voter_check in ('email', 'guest_list') then
+        v_id := lower(btrim(coalesce(p_voter, '')));
+        if v_id !~ '^[^\s@]+@[^\s@]+\.[^\s@]+$' or length(v_id) > 200 then
+            return jsonb_build_object('ok', false, 'error', 'id');
+        end if;
+        if f.voter_check = 'guest_list' and not exists (
+            select 1 from public.guests where event_id::text = f.event_id and lower(btrim(email)) = v_id) then
+            return jsonb_build_object('ok', false, 'error', 'not_on_list');
+        end if;
+    else
+        v_id := public.voting_norm_id(p_voter);
+        if v_id = '' or length(v_id) > 40 then
+            return jsonb_build_object('ok', false, 'error', 'id');
+        end if;
+        if f.voter_check = 'roster' and not exists (select 1 from public.voting_roster where student_id = v_id) then
+            return jsonb_build_object('ok', false, 'error', 'not_on_list');
+        end if;
     end if;
+
+    -- What they picked
     if p_choices is null or jsonb_typeof(p_choices) <> 'array' then
         return jsonb_build_object('ok', false, 'error', 'choices');
     end if;
-
     v_n := (select count(distinct x) from jsonb_array_elements_text(p_choices) x);
     if v_n < 1 or v_n <> jsonb_array_length(p_choices) or v_n > f.max_choices then
         return jsonb_build_object('ok', false, 'error', 'choices', 'max', f.max_choices);
@@ -467,8 +534,13 @@ begin
         return jsonb_build_object('ok', false, 'error', 'choices', 'max', f.max_choices);
     end if;
 
-    perform pg_advisory_xact_lock(hashtext('voting:' || f.id::text || ':' || v_id));
-    if exists (select 1 from public.voting_votes where form_id = f.id and voter_id = v_id) then
+    -- One vote per person across the whole results group
+    v_group := public.voting_group_key(f.group_name);
+    perform pg_advisory_xact_lock(hashtext('voting:' || coalesce('g:' || v_group, f.id::text) || ':' || v_id));
+    if exists (select 1 from public.voting_votes v
+                where v.voter_id = v_id
+                  and (v.form_id = f.id or (v_group is not null and v.form_id in (
+                        select g.id from public.voting_forms g where public.voting_group_key(g.group_name) = v_group)))) then
         return jsonb_build_object('ok', false, 'error', 'already');
     end if;
 
@@ -476,7 +548,7 @@ begin
     select f.id, v_ballot, v_id, x, (select c->>'name' from jsonb_array_elements(f.candidates) c where c->>'id' = x limit 1), 'WEB'
       from jsonb_array_elements_text(p_choices) x;
 
-    return jsonb_build_object('ok', true, 'ballot_id', v_ballot);
+    return jsonb_build_object('ok', true);
 exception when unique_violation then
     return jsonb_build_object('ok', false, 'error', 'already');
 end $$;
@@ -485,8 +557,7 @@ end $$;
 -- ── 8. Who can call what ─────────────────────────────────────
 
 grant execute on function public.voting_form_public(text)               to anon, authenticated;
-grant execute on function public.voting_check_voter(text, text)         to anon, authenticated;
-grant execute on function public.cast_vote(text, text, jsonb)           to anon, authenticated;
+grant execute on function public.cast_vote(text, text, jsonb, text)     to anon, authenticated;
 
 -- Admin functions: callable with the publishable key, but each one checks the session token
 grant execute on function public.voting_admin_login(text, boolean)      to anon, authenticated;
@@ -495,8 +566,8 @@ grant execute on function public.voting_admin_logout(text)              to anon,
 grant execute on function public.voting_forms_list(text)                to anon, authenticated;
 grant execute on function public.voting_form_save(text, jsonb)          to anon, authenticated;
 grant execute on function public.voting_form_delete(text, uuid)         to anon, authenticated;
-grant execute on function public.voting_results(text, uuid)             to anon, authenticated;
-grant execute on function public.voting_export(text, uuid)              to anon, authenticated;
+grant execute on function public.voting_results(text, uuid, boolean)    to anon, authenticated;
+grant execute on function public.voting_export(text, uuid, boolean)     to anon, authenticated;
 grant execute on function public.voting_add_manual(text, uuid, text, integer)    to anon, authenticated;
 grant execute on function public.voting_remove_manual(text, uuid, text, integer) to anon, authenticated;
 grant execute on function public.voting_clear_voter(text, uuid, text)   to anon, authenticated;
