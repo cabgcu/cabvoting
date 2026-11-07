@@ -397,11 +397,7 @@ begin
         return jsonb_build_object('state', 'missing');
     end if;
     if f.event_id is not null then
-        begin
-            select name into v_event from public.events where id::text = f.event_id;
-        exception when others then
-            v_event := null;
-        end;
+        select name into v_event from public.events where id::text = f.event_id;
     end if;
     return jsonb_build_object(
         'state', public.voting_form_state(f),
