@@ -96,6 +96,7 @@ function load() {
     form = d;
     document.title = d.title + ' · CAB Voting';
     $('top').textContent = d.event_name || 'Canyon Activities Board';
+    if (d.state === 'sms') return state('💬', 'Vote by text', d.closed_message || 'This vote happens by text message. Use the number and keyword on screen.');
     if (d.state === 'open') return showBallot();
     var msg = d.state === 'not_yet'
       ? 'Voting opens ' + new Date(d.opens_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + '.\nKeep this page open — it opens by itself.'

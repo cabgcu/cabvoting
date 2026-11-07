@@ -56,6 +56,7 @@ create table if not exists public.voting_forms (
 --                'email'      = any email address, once each
 --                'guest_list' = email on the VIP Check In guest list of the form's event
 --                'open'       = no ID, one vote per phone
+--                'sms'        = text messages imported from a Poll Everywhere CSV (one per phone number)
 alter table public.voting_forms add column if not exists group_name  text;
 alter table public.voting_forms add column if not exists access_code text;
 
@@ -239,7 +240,7 @@ begin
         status          = case when p_form->>'status' in ('open', 'closed', 'auto') then p_form->>'status' else 'closed' end,
         opens_at        = nullif(p_form->>'opens_at', '')::timestamptz,
         closes_at       = nullif(p_form->>'closes_at', '')::timestamptz,
-        voter_check     = case when p_form->>'voter_check' in ('roster', 'any', 'email', 'guest_list', 'open')
+        voter_check     = case when p_form->>'voter_check' in ('roster', 'any', 'email', 'guest_list', 'open', 'sms')
                                then p_form->>'voter_check' else 'roster' end,
         group_name      = nullif(btrim(coalesce(p_form->>'group_name', '')), ''),
         access_code     = nullif(btrim(coalesce(p_form->>'access_code', '')), ''),
@@ -291,18 +292,21 @@ begin
         'forms', coalesce((
             select jsonb_agg(jsonb_build_object(
                        'form_id', f.id, 'name', f.name, 'voter_check', f.voter_check, 'state', public.voting_form_state(f),
-                       'ballots', coalesce(t.ballots, 0), 'manual_ballots', coalesce(t.manual, 0), 'last_hour', coalesce(t.last_hour, 0))
+                       'ballots', coalesce(t.ballots, 0), 'manual_ballots', coalesce(t.manual, 0), 'sms_ballots', coalesce(t.sms, 0),
+                       'last_hour', coalesce(t.last_hour, 0))
                    order by f.created_at)
               from public.voting_forms f
               left join (select form_id, count(distinct ballot_id) as ballots,
-                                count(distinct ballot_id) filter (where method <> 'WEB') as manual,
+                                count(distinct ballot_id) filter (where method = 'MANUAL') as manual,
+                                count(distinct ballot_id) filter (where method = 'SMS') as sms,
                                 count(distinct ballot_id) filter (where created_at >= now() - interval '1 hour') as last_hour
                            from public.voting_votes where form_id = any(v_ids) group by form_id) t on t.form_id = f.id
              where f.id = any(v_ids)), '[]'::jsonb),
         'by_candidate', coalesce((
-            select jsonb_agg(jsonb_build_object('form_id', form_id, 'candidate_id', candidate_id, 'name', name, 'count', n, 'manual', manual))
+            select jsonb_agg(jsonb_build_object('form_id', form_id, 'candidate_id', candidate_id, 'name', name, 'count', n, 'manual', manual, 'sms', sms))
               from (select form_id, candidate_id, max(candidate_name) as name, count(*) as n,
-                           count(*) filter (where method <> 'WEB') as manual
+                           count(*) filter (where method = 'MANUAL') as manual,
+                           count(*) filter (where method = 'SMS') as sms
                       from public.voting_votes where form_id = any(v_ids)
                      group by form_id, candidate_id) t), '[]'::jsonb),
         'recent', coalesce((
@@ -391,6 +395,65 @@ begin
 end $$;
 
 
+-- Poll Everywhere text votes, uploaded from its CSV export into a 'sms' form.
+-- p_rows: [{ "phone": "+1 (602) 555-1234", "candidate_id": "<id on this form>" }, ...]
+-- One vote per phone number across the results group, so uploading a newer
+-- export again only adds the new texts.
+create or replace function public.voting_import_sms(p_token text, p_form_id uuid, p_rows jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+    f       public.voting_forms;
+    v_group text;
+    r       jsonb;
+    v_phone text;
+    v_name  text;
+    v_added integer := 0;
+    v_dup   integer := 0;
+    v_bad   integer := 0;
+begin
+    perform public.voting_admin_check(p_token);
+    select * into f from public.voting_forms where id = p_form_id;
+    if not found then
+        raise exception 'Form not found';
+    end if;
+    if f.voter_check <> 'sms' then
+        raise exception 'This form isn''t set to text messages';
+    end if;
+    if p_rows is null or jsonb_typeof(p_rows) <> 'array' then
+        raise exception 'No rows';
+    end if;
+    v_group := public.voting_group_key(f.group_name);
+    -- One import at a time per group
+    perform pg_advisory_xact_lock(hashtext('voting-import:' || coalesce('g:' || v_group, f.id::text)));
+
+    for r in select value from jsonb_array_elements(p_rows) loop
+        v_phone := regexp_replace(coalesce(r->>'phone', ''), '\D', '', 'g');
+        if length(v_phone) = 11 and left(v_phone, 1) = '1' then
+            v_phone := substr(v_phone, 2);
+        end if;
+        v_name := null;
+        select c->>'name' into v_name from jsonb_array_elements(f.candidates) c where c->>'id' = r->>'candidate_id' limit 1;
+        if length(v_phone) < 7 or length(v_phone) > 15 or v_name is null then
+            v_bad := v_bad + 1;
+            continue;
+        end if;
+        v_phone := 'sms:' || v_phone;
+        if exists (select 1 from public.voting_votes v
+                    where v.voter_id = v_phone
+                      and (v.form_id = f.id or (v_group is not null and v.form_id in (
+                            select g.id from public.voting_forms g where public.voting_group_key(g.group_name) = v_group)))) then
+            v_dup := v_dup + 1;
+            continue;
+        end if;
+        insert into public.voting_votes (form_id, ballot_id, voter_id, candidate_id, candidate_name, method)
+        values (f.id, gen_random_uuid(), v_phone, r->>'candidate_id', v_name, 'SMS');
+        v_added := v_added + 1;
+    end loop;
+
+    return jsonb_build_object('added', v_added, 'duplicates', v_dup, 'skipped', v_bad);
+end $$;
+
+
 -- ── 6. Admin: student ID list ────────────────────────────────
 
 create or replace function public.voting_roster_count(p_token text)
@@ -460,7 +523,7 @@ begin
         select name into v_event from public.events where id::text = f.event_id;
     end if;
     return jsonb_build_object(
-        'state', public.voting_form_state(f),
+        'state', case when f.voter_check = 'sms' then 'sms' else public.voting_form_state(f) end,
         'title', coalesce(f.title, f.name), 'intro', f.intro, 'banner_url', f.banner_url,
         'event_name', v_event, 'voter_check', f.voter_check, 'id_label', f.id_label,
         'needs_code', f.access_code is not null, 'max_choices', f.max_choices,
@@ -489,7 +552,7 @@ declare
     v_n      integer;
 begin
     select * into f from public.voting_forms where slug = lower(btrim(coalesce(p_slug, '')));
-    if not found or public.voting_form_state(f) <> 'open' then
+    if not found or f.voter_check = 'sms' or public.voting_form_state(f) <> 'open' then
         return jsonb_build_object('ok', false, 'error', 'closed');
     end if;
     if f.access_code is not null and lower(btrim(coalesce(p_code, ''))) <> lower(btrim(f.access_code)) then
@@ -572,6 +635,7 @@ grant execute on function public.voting_add_manual(text, uuid, text, integer)   
 grant execute on function public.voting_remove_manual(text, uuid, text, integer) to anon, authenticated;
 grant execute on function public.voting_clear_voter(text, uuid, text)   to anon, authenticated;
 grant execute on function public.voting_reset(text, uuid)               to anon, authenticated;
+grant execute on function public.voting_import_sms(text, uuid, jsonb)   to anon, authenticated;
 grant execute on function public.voting_roster_count(text)              to anon, authenticated;
 grant execute on function public.voting_roster_add(text, text[], boolean) to anon, authenticated;
 grant execute on function public.voting_roster_remove(text, text[])     to anon, authenticated;

@@ -32,6 +32,15 @@ The **Active event / form** picker lists each group once (e.g. "GGT 2026 · 3 fo
 
 Other options: "Any ID (once each)" and "No ID — one vote per phone". Any form can require an access code.
 
+### Text votes from Poll Everywhere
+
+Poll Everywhere no longer has a public API, so text votes come in from its CSV export:
+
+1. Make a form (e.g. **GGT Text**) with "Who can vote" set to **Text message — import from Poll Everywhere**, copying performers from your first form so it joins the same results group.
+2. In Poll Everywhere, download the poll's responses as a CSV, with phone numbers included.
+3. In Live Results (or on the form's card) click **Import CSV**. The admin finds the answer, phone and source columns, matches each answer to a performer (change any that are wrong), and counts one vote per phone number. A phone's first text is the one that counts.
+4. Upload a newer export as often as you like during the show. Phone numbers already counted are skipped, so only new texts are added.
+
 ## How it's protected
 
 - All voting tables have Row Level Security on with no policies. The publishable key can't read or edit them directly.
