@@ -6,6 +6,7 @@ Voting forms for CAB events, hosted at **cabgcu.com/cabvoting**. Uses the same S
 | --- | --- |
 | `index.html` | Admin: create voting forms, open/close/schedule them, live results, manual votes, student ID list. Logs in with the VIP Check In password. |
 | `vote.html?f=<link-ending>` | Public voting page for one form. Each form gets its own link (and QR code) from the admin. |
+| `loadtest.mjs` | Load test: simulate thousands of people voting at once (see below). |
 | `supabase-voting.sql` | Database setup. Run once in Supabase → SQL Editor (safe to re-run). |
 
 ## Setup
@@ -46,3 +47,24 @@ Poll Everywhere no longer has a public API, so text votes come in from its CSV e
 - All voting tables have Row Level Security on with no policies. The publishable key can't read or edit them directly.
 - The voting page can only see an open form and cast one ballot per ID. The database checks the ID list, the pick limit and double votes under a lock.
 - Admin actions need a session token that only the staff password gets (30 days with "Keep me signed in", otherwise 12 hours).
+
+## Load test (what happens when 6000 people vote at once)
+
+`loadtest.mjs` makes N simulated voters each load the form and cast a vote at the same moment, using the same 12 s timeout and retry rules as `vote.html`. It needs Node 18 or newer and nothing else.
+
+1. In the admin, make a **test form** (not a live one) with a few performers. Set **Who can vote** to *One vote per phone*, *Any ID* or *Email*; a form that checks the Student ID list or VIP guest list would reject the fake voters.
+2. Open voting on it.
+3. Run, from this folder:
+   ```
+   ulimit -n 20000
+   node loadtest.mjs --form <link-ending> --voters 6000
+   ```
+   `ulimit` lets your computer open 6000 connections at once (macOS allows only 256 by default).
+4. When it's done, press **Reset** on the test form to delete the test votes.
+
+Options: `--ramp 30` spreads the 6000 arrivals over 30 seconds (more like a real crowd after a QR code goes up); `--think 10` gives each voter up to 10 s to pick; `--code X` for a form with an access code; `--no-retry` shows raw first-try failures.
+
+The report shows how many votes were counted, response times (p50 / p90 / p99), and every HTTP status and error. Mostly `200` and "voted" = it held up. `503`/`429`/timeouts = the server was busy (voters see "Network is busy — still sending…"). If many votes failed after retries, that's what real voters would have seen.
+
+Note: all 6000 requests come from one computer and one IP, which is harsher than real phones on different networks, and Supabase may throttle a single IP. If you see lots of `429`, try a `--ramp`.
+
