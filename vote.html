@@ -3,66 +3,144 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#131316">
+<meta name="theme-color" content="#09090b">
 <title>CAB Voting</title>
-<!-- Built for a packed arena: one small file, nothing else to download, two calls per voter. -->
+<!-- Built for a packed arena: one small file, nothing else to download, two calls per voter.
+     Uses Inter if the phone has it, otherwise the system font — no font download. -->
 <style>
-:root { --bg:#131316; --card:#1c1c22; --inset:#111115; --line:#2a2a31; --text:#fff; --muted:#a1a1aa; --accent:#8b5cf6; --blue:#2563eb; --ok:#4ade80; --bad:#f87171; }
+:root {
+  --bg:#09090b; --card:#18181b; --line:rgba(39,39,42,.8); --line-hi:#3f3f46; --chip:rgba(39,39,42,.6);
+  --text:#d4d4d8; --head:#f4f4f5; --sub:#a1a1aa; --muted:#71717a; --faint:#52525b;
+  --ok:#34d399; --ok-bg:rgba(16,185,129,.1); --ok-line:rgba(16,185,129,.2); --ok-ring:rgba(16,185,129,.5);
+  --bad:#fb7185; --warn:#fbbf24; --warn-dot:#f59e0b;
+}
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html { background: var(--bg); color-scheme: dark; }
-body { margin: 0; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
-.wrap { max-width: 520px; margin: 0 auto; padding: calc(20px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); }
-.top { color: var(--muted); font-size: 13px; font-weight: 600; margin: 0 4px 14px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 22px; overflow: hidden; }
-.body { padding: 24px 20px; }
-.banner { display: block; width: 100%; height: auto; }
-h1 { margin: 0 0 6px; font-size: 24px; line-height: 1.2; }
-.intro { color: var(--muted); margin: 0 0 4px; white-space: pre-line; }
-label, .lbl { display: block; color: var(--muted); font-size: 13px; font-weight: 600; margin: 20px 0 8px; }
-input { width: 100%; height: 54px; padding: 0 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--inset); color: var(--text); font-family: inherit; font-size: 20px; font-weight: 600; text-align: center; letter-spacing: .04em; outline: none; }
-input:focus { border-color: #52525b; }
-input.email { font-size: 17px; letter-spacing: 0; }
-input::placeholder { color: #52525b; font-weight: 500; font-size: 16px; letter-spacing: 0; }
-.opt { display: flex; align-items: center; gap: 12px; width: 100%; margin-bottom: 8px; padding: 14px; border-radius: 16px; border: 1px solid var(--line); background: var(--inset); color: var(--text); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
-.opt .n { width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; background: #26262d; color: var(--muted); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
-.opt img { width: 48px; height: 48px; flex-shrink: 0; border-radius: 12px; object-fit: cover; background: #26262d; }
-.opt .t { flex: 1; min-width: 0; font-weight: 700; font-size: 17px; line-height: 1.25; }
-.opt .t small { display: block; color: var(--muted); font-weight: 500; font-size: 13px; }
-.opt .c { width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; border: 2px solid #3f3f46; }
-.opt.on { border-color: var(--accent); background: #221b33; }
-.opt.on .n, .opt.on .c { background: var(--accent); border-color: var(--accent); color: #fff; }
-.opt.on .c { box-shadow: inset 0 0 0 4px #221b33; }
-.btn { display: block; width: 100%; margin-top: 16px; padding: 16px; border: 0; border-radius: 999px; background: var(--blue); color: #fff; font-family: inherit; font-size: 17px; font-weight: 700; line-height: 1; cursor: pointer; touch-action: manipulation; }
-.btn:disabled { opacity: .45; }
-.btn.alt { background: transparent; border: 1px solid #3f3f46; color: var(--text); font-weight: 600; }
-.err { color: var(--bad); font-size: 14px; font-weight: 600; text-align: center; min-height: 21px; margin-top: 10px; }
-.state { text-align: center; padding: 40px 22px; }
-.state .i { font-size: 44px; line-height: 1; margin-bottom: 14px; }
-.state h2 { margin: 0 0 8px; font-size: 22px; }
-.state p { color: var(--muted); margin: 0; white-space: pre-line; }
-.picks { list-style: none; margin: 18px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 14px; text-align: left; }
-.picks li { padding: 11px 14px; font-weight: 700; border-top: 1px solid var(--line); }
-.picks li:first-child { border-top: 0; }
-.foot { text-align: center; color: #52525b; font-size: 12px; margin-top: 18px; }
+body { margin: 0; font: 15px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+::selection { background: rgba(16,185,129,.3); }
+svg { display: block; }
+
+/* Offline banner — slides down from the top */
+.offline { position: fixed; top: 0; left: 0; right: 0; z-index: 50; display: flex; align-items: center; justify-content: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 16px 8px; background: rgba(245,158,11,.1); border-bottom: 1px solid rgba(245,158,11,.2); color: var(--warn); font-size: 12px; font-weight: 500; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transform: translateY(-100%); transition: transform .3s cubic-bezier(.4,0,.2,1); }
+.offline.on { transform: translateY(0); }
+
+.wrap { max-width: 448px; margin: 0 auto; padding: calc(32px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 24px; }
+
+/* Header */
+.hd { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 0 8px; }
+.eyebrow { margin: 0 0 6px; color: var(--muted); font-size: 12px; font-weight: 500; }
+h1 { margin: 0; color: var(--head); font-size: 20px; font-weight: 600; line-height: 1.3; letter-spacing: -.015em; }
+.sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; white-space: pre-line; }
+.sub:empty { display: none; }
+.dot { width: 8px; height: 8px; flex-shrink: 0; margin-top: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px rgba(16,185,129,.6); transition: background-color .3s, box-shadow .3s; }
+.dot.warn { background: var(--warn-dot); box-shadow: 0 0 8px rgba(245,158,11,.6); }
+.banner { display: block; width: 100%; height: auto; border-radius: 16px; border: 1px solid var(--line); }
+
+/* Loading skeleton */
+.skel { display: flex; flex-direction: column; gap: 12px; opacity: .5; animation: pulse 2s cubic-bezier(.4,0,.6,1) infinite; }
+.skel div { height: 72px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+.bar { display: block; height: 20px; width: 60%; border-radius: 6px; background: var(--card); animation: pulse 2s cubic-bezier(.4,0,.6,1) infinite; }
+@keyframes pulse { 50% { opacity: .5; } }
+@keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+
+/* Fields */
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.field label, .lbl { display: block; color: var(--sub); font-size: 13px; font-weight: 500; margin: 0 0 8px 4px; }
+.lbl { margin-top: 8px; }
+input { width: 100%; height: 52px; padding: 0 16px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); color: var(--head); font-family: inherit; font-size: 17px; font-weight: 500; outline: none; transition: border-color .2s, box-shadow .2s; }
+input:hover { border-color: var(--line-hi); }
+input:focus { border-color: var(--ok-line); box-shadow: 0 0 0 2px var(--ok-ring); }
+input::placeholder { color: var(--faint); font-weight: 400; }
+
+/* Choices */
+.opt { display: flex; align-items: center; gap: 16px; width: 100%; padding: 16px; border-radius: 16px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; transition: background-color .2s, border-color .2s; }
+.opt:hover { border-color: var(--line-hi); }
+.opt:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ok-ring); }
+.opt .n { width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px; background: var(--chip); color: var(--muted); display: flex; align-items: center; justify-content: center; font-weight: 500; font-size: 13px; transition: background-color .2s, color .2s; }
+.opt img { width: 48px; height: 48px; flex-shrink: 0; border-radius: 12px; object-fit: cover; background: var(--chip); }
+.opt .t { flex: 1; min-width: 0; color: var(--head); font-weight: 500; font-size: 15px; line-height: 1.3; }
+.opt .t small { display: block; margin-top: 4px; color: var(--sub); font-weight: 400; font-size: 13px; line-height: 1.35; }
+.opt .c { width: 24px; height: 24px; flex-shrink: 0; border-radius: 50%; border: 1.5px solid var(--line-hi); color: transparent; display: flex; align-items: center; justify-content: center; transition: background-color .2s, border-color .2s, color .2s; }
+.opt.on { background: var(--ok-bg); border-color: var(--ok-line); }
+.opt.on .n { background: rgba(16,185,129,.15); color: var(--ok); }
+.opt.on .c { background: #10b981; border-color: #10b981; color: var(--bg); animation: pop .2s ease-out; }
+
+/* Buttons */
+.btn { display: flex; align-items: center; justify-content: center; width: 100%; height: 52px; margin-top: 8px; padding: 0 16px; border: 0; border-radius: 16px; background: var(--head); color: var(--bg); font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer; touch-action: manipulation; transition: background-color .2s, color .2s, transform .1s; }
+.btn:active:not(:disabled) { transform: scale(.98); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ok-ring); }
+.btn:disabled { background: var(--card); color: var(--faint); cursor: default; }
+.btn.alt { background: transparent; border: 1px solid var(--line); color: var(--text); font-weight: 500; margin-top: 20px; }
+.btn.alt:hover { border-color: var(--line-hi); }
+.err { color: var(--bad); font-size: 13px; font-weight: 500; text-align: center; min-height: 20px; }
+
+/* Status screens */
+.state { text-align: center; padding: 36px 24px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+.state .i { width: 48px; height: 48px; margin: 0 auto 16px; border-radius: 50%; background: var(--chip); color: var(--text); display: flex; align-items: center; justify-content: center; }
+.state .i.ok { background: var(--ok-bg); color: var(--ok); animation: pop .3s ease-out; }
+.state .i.warn { background: rgba(245,158,11,.1); color: var(--warn); }
+.state h2 { margin: 0 0 6px; color: var(--head); font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.state p { color: var(--sub); font-size: 14px; margin: 0; white-space: pre-line; }
+.picks { list-style: none; margin: 20px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.picks li { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--ok-bg); border: 1px solid var(--ok-line); color: var(--head); font-size: 15px; font-weight: 500; }
+.picks li svg { color: var(--ok); flex-shrink: 0; }
+.foot { text-align: center; color: var(--faint); font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="top" id="top">Canyon Activities Board</div>
-  <div class="card" id="app"><div class="state"><p>Loading…</p></div></div>
-  <div class="foot">© Canyon Activities Board</div>
+<div class="offline" id="offline" role="status" aria-live="polite">
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></svg>
+  Offline. Keep this page open — it reconnects.
 </div>
+<main class="wrap">
+  <div id="bn" hidden></div>
+  <header class="hd">
+    <div>
+      <p class="eyebrow" id="top">Canyon Activities Board</p>
+      <h1 id="ttl"><span class="bar"></span></h1>
+      <p class="sub" id="sub"></p>
+    </div>
+    <span class="dot" id="dot" title="Connected"></span>
+  </header>
+  <div id="app"><div class="skel" aria-label="Loading"><div></div><div></div><div></div></div></div>
+  <div class="foot">© Canyon Activities Board</div>
+</main>
 <script>
 // Same Supabase project as VIP Check In. Plain fetch — no library to download.
 var API = 'https://raraxpjsftqxhwkpwpab.supabase.co/rest/v1/rpc/';
 var KEY = 'sb_publishable_p4FqN3nJTT5GFNU_xqZtYg_7fPtkKhS';
 var SLUG = (new URLSearchParams(location.search).get('f') || '').trim().toLowerCase();
 var app = document.getElementById('app');
-var form = null, picked = [], sending = false, waitTimer = null;
+var form = null, picked = [], sending = false, waitTimer = null, netBusy = false;
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function url(u) { return /^https:\/\//i.test(u || '') ? u : ''; }
 function $(id) { return document.getElementById(id); }
+
+// Small inline icons (no icon font to download)
+function svg(paths, size) { return '<svg width="' + (size || 22) + '" height="' + (size || 22) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>'; }
+var ICONS = {
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  wifi: '<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  text: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
+  done: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>'
+};
+var TONE = { done: 'ok', wifi: 'warn' };
+
+// ── Connection indicator ───────────────────────────────────
+function net() {
+  var off = navigator.onLine === false;
+  $('offline').className = off ? 'offline on' : 'offline';
+  $('dot').className = off || netBusy ? 'dot warn' : 'dot';
+  $('dot').title = off ? 'Offline' : netBusy ? 'Network is busy' : 'Connected';
+}
+window.addEventListener('online', function () { net(); if (waitTimer && (!form || form.state !== 'open')) load(); });
+window.addEventListener('offline', net);
 
 // One database call. Network trouble / server busy -> { retry: true }.
 function call(fn, body) {
@@ -75,33 +153,42 @@ function call(fn, body) {
     signal: ctl ? ctl.signal : undefined
   }).then(function (r) {
     clearTimeout(t);
-    if (r.status >= 500 || r.status === 429) return { retry: true };
+    netBusy = r.status >= 500 || r.status === 429; net();
+    if (netBusy) return { retry: true };
     if (!r.ok) return { failed: true };
     return r.json();
-  }, function () { clearTimeout(t); return { retry: true }; });
+  }, function () { clearTimeout(t); netBusy = true; net(); return { retry: true }; });
 }
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
+function head(title, sub) { $('ttl').textContent = title; $('sub').textContent = sub || ''; }
 function state(icon, title, msg, extra) {
-  app.innerHTML = '<div class="state"><div class="i">' + icon + '</div><h2>' + esc(title) + '</h2><p>' + esc(msg) + '</p>' + (extra || '') + '</div>';
+  app.innerHTML = '<div class="state"><div class="i ' + (TONE[icon] || '') + '">' + svg(ICONS[icon]) + '</div><h2>' + esc(title) + '</h2><p>' + esc(msg) + '</p>' + (extra || '') + '</div>';
 }
 
 // ── Load the form (call 1) ─────────────────────────────────
 function load() {
   clearTimeout(waitTimer);
-  if (!SLUG) return state('🔗', 'Voting page not found', 'This link is missing the voting form. Check the link or QR code.');
+  if (!SLUG) { head('CAB Voting'); return state('link', 'Voting page not found', 'This link is missing the voting form. Check the link or QR code.'); }
   return call('voting_form_public', { p_slug: SLUG }).then(function (d) {
-    if (!d || d.retry || d.failed) { if (!form) state('📶', 'Connecting…', 'The network is busy. Trying again…'); return wait(3000 + Math.random() * 4000); }
-    if (d.state === 'missing') return state('🔗', 'Voting page not found', 'This voting form doesn\'t exist. Check the link or QR code.');
+    if (!d || d.retry || d.failed) {
+      if (!form) { head('CAB Voting'); state('wifi', 'Connecting…', 'The network is busy. Trying again…'); }
+      return wait(3000 + Math.random() * 4000);
+    }
+    if (d.state === 'missing') { head('CAB Voting'); return state('link', 'Voting page not found', 'This voting form doesn\'t exist. Check the link or QR code.'); }
     form = d;
     document.title = d.title + ' · CAB Voting';
     $('top').textContent = d.event_name || 'Canyon Activities Board';
-    if (d.state === 'sms') return state('💬', 'Vote by text', d.closed_message || 'This vote happens by text message. Use the number and keyword on screen.');
+    var banner = url(d.banner_url);
+    $('bn').innerHTML = banner ? '<img class="banner" src="' + esc(banner) + '" alt="">' : '';
+    $('bn').hidden = !banner;
+    head(d.title, d.state === 'open' ? d.intro : '');
+    if (d.state === 'sms') return state('text', 'Vote by text', d.closed_message || 'This vote happens by text message. Use the number and keyword on screen.');
     if (d.state === 'open') return showBallot();
     var msg = d.state === 'not_yet'
       ? 'Voting opens ' + new Date(d.opens_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + '.\nKeep this page open — it opens by itself.'
       : (d.closed_message || 'Voting isn\'t open right now.\nKeep this page open — it opens by itself.');
-    state(d.state === 'not_yet' ? '⏳' : '🔒', d.state === 'not_yet' ? 'Voting opens soon' : 'Voting is closed', msg,
+    state(d.state === 'not_yet' ? 'clock' : 'lock', d.state === 'not_yet' ? 'Voting opens soon' : 'Voting is closed', msg,
       '<button class="btn alt" onclick="load()">Check again</button>');
     wait(30000 + Math.random() * 15000);
   });
@@ -136,19 +223,19 @@ function showBallot(err) {
   clearTimeout(waitTimer); waitTimer = null;
   var max = maxPicks(), label = idLabel();
   var id = $('vid') ? $('vid').value : '', code = $('vcode') ? $('vcode').value : '';
-  var banner = url(form.banner_url);
-  app.innerHTML = (banner ? '<img class="banner" src="' + esc(banner) + '" alt="">' : '') +
-    '<div class="body"><h1>' + esc(form.title) + '</h1>' + (form.intro ? '<p class="intro">' + esc(form.intro) + '</p>' : '') +
-    (!asksId() ? '' : asksEmail()
-      ? '<label for="vid">Email</label><input id="vid" class="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="200" placeholder="you@example.com">'
-      : '<label for="vid">' + esc(label) + '</label><input id="vid" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="40" placeholder="Enter your ' + esc(label) + '">') +
-    (form.needs_code ? '<label for="vcode">Access code</label><input id="vcode" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="Enter the code">' : '') +
+  head(form.title, form.intro);
+  app.innerHTML = '<div class="stack">' +
+    (!asksId() ? '' : '<div class="field">' + (asksEmail()
+      ? '<label for="vid">Email</label><input id="vid" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="200" placeholder="you@example.com">'
+      : '<label for="vid">' + esc(label) + '</label><input id="vid" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="40" placeholder="Enter your ' + esc(label) + '">') + '</div>') +
+    (form.needs_code ? '<div class="field"><label for="vcode">Access code</label><input id="vcode" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="Enter the code"></div>' : '') +
     '<div class="lbl">' + (max > 1 ? 'Pick up to ' + max : 'Pick one') + '</div>' +
     form.candidates.map(function (c, i) {
       var img = url(c.image_url);
       return '<button type="button" class="opt" data-id="' + esc(c.id) + '" aria-pressed="false" onclick="pick(this)">' +
         (img ? '<img src="' + esc(img) + '" alt="" loading="lazy">' : '<span class="n">' + (i + 1) + '</span>') +
-        '<span class="t">' + esc(c.name) + (c.subtitle ? '<small>' + esc(c.subtitle) + '</small>' : '') + '</span><span class="c"></span></button>';
+        '<span class="t">' + esc(c.name) + (c.subtitle ? '<small>' + esc(c.subtitle) + '</small>' : '') + '</span>' +
+        '<span class="c">' + svg(ICONS.check, 14).replace('stroke-width="2"', 'stroke-width="3"') + '</span></button>';
     }).join('') +
     '<button class="btn" id="go" onclick="vote()">Vote</button><div class="err" id="err">' + esc(err || '') + '</div></div>';
   ['vid', 'vcode'].forEach(function (k) {
@@ -200,8 +287,8 @@ function vote() {
       // A retry that hits "already" means an earlier try got through
       if (d.ok || (d.error === 'already' && unsure)) return done();
       if (d.error === 'already') return asksId()
-        ? state('✅', 'Already voted', voter + ' has already voted. Thanks!', '<button class="btn alt" onclick="again()">Use a different ' + esc(label) + '</button>')
-        : state('✅', 'Already voted', 'This phone has already voted. Thanks!');
+        ? state('done', 'Already voted', voter + ' has already voted. Thanks!', '<button class="btn alt" onclick="again()">Use a different ' + esc(label) + '</button>')
+        : state('done', 'Already voted', 'This phone has already voted. Thanks!');
       if (d.error === 'code') { sync(); $('err').textContent = 'That access code isn\'t right.'; $('vcode').focus(); return; }
       if (d.error === 'not_on_list' || d.error === 'id') {
         sync();
@@ -219,11 +306,13 @@ function vote() {
 
 function done() {
   var names = picked.map(function (id) { for (var i = 0; i < form.candidates.length; i++) if (form.candidates[i].id === id) return form.candidates[i].name; return ''; });
-  state('🎉', 'Vote confirmed!', form.success_message || 'Your vote is in. Enjoy the show!',
-    '<ul class="picks">' + names.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('') + '</ul>');
+  head(form.title, '');
+  state('done', 'Vote confirmed!', form.success_message || 'Your vote is in. Enjoy the show!',
+    '<ul class="picks">' + names.map(function (n) { return '<li>' + svg(ICONS.check, 16) + esc(n) + '</li>'; }).join('') + '</ul>');
 }
 function again() { picked = []; showBallot(); }
 
+net();
 load();
 </script>
 </body>
