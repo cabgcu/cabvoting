@@ -59,6 +59,13 @@ create table if not exists public.voting_forms (
 --                'sms'        = text messages imported from a Poll Everywhere CSV (one per phone number)
 alter table public.voting_forms add column if not exists group_name  text;
 alter table public.voting_forms add column if not exists access_code text;
+--   results_public:      the public results page (results.html?f=<slug>) shows the winners
+--   results_places:      how many places it shows (the rest are never sent to the browser)
+--   results_show_counts: whether it shows vote totals
+-- These are set for the whole results group at once.
+alter table public.voting_forms add column if not exists results_public      boolean not null default false;
+alter table public.voting_forms add column if not exists results_places      integer not null default 2;
+alter table public.voting_forms add column if not exists results_show_counts boolean not null default true;
 
 -- One row per pick. A ballot with 3 picks = 3 rows sharing a ballot_id.
 create table if not exists public.voting_votes (
@@ -617,10 +624,120 @@ exception when unique_violation then
 end $$;
 
 
+-- ── 7b. Public results page (results.html) ───────────────────
+
+-- The winners of a form's results group, top results_places places only.
+-- Performers are added up by name across the group (same as the admin leaderboard).
+-- Ties at the cut-off are all shown (two performers tied for 2nd are both "2nd").
+-- Internal: the public page goes through voting_results_public, the admin preview
+-- through voting_results_preview.
+create or replace function public.voting_results_payload(p_form_id uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+    f        public.voting_forms;
+    v_ids    uuid[];
+    v_places integer;
+    v_event  text;
+    v_places_json jsonb;
+begin
+    select * into f from public.voting_forms where id = p_form_id;
+    if not found then
+        return jsonb_build_object('state', 'missing');
+    end if;
+    v_ids := public.voting_scope(f.id, true);
+    v_places := greatest(1, least(coalesce(f.results_places, 2), 10));
+    if f.event_id is not null then
+        select name into v_event from public.events where id::text = f.event_id;
+    end if;
+
+    with cands as (
+        select g.id as form_id, g.created_at, x.ord, x.c->>'id' as cid, x.c->>'name' as name,
+               x.c->>'subtitle' as subtitle, x.c->>'image_url' as image_url,
+               lower(regexp_replace(btrim(coalesce(x.c->>'name', '')), '\s+', ' ', 'g')) as k
+          from public.voting_forms g
+          cross join lateral jsonb_array_elements(g.candidates) with ordinality as x(c, ord)
+         where g.id = any(v_ids)
+    ), votes as (
+        select coalesce(c.name, v.candidate_name, 'Removed option') as name,
+               coalesce(c.k, lower(regexp_replace(btrim(coalesce(v.candidate_name, 'Removed option')), '\s+', ' ', 'g'))) as k
+          from public.voting_votes v
+          left join cands c on c.form_id = v.form_id and c.cid = v.candidate_id
+         where v.form_id = any(v_ids)
+    ), tally as (
+        select k, max(name) as name, count(*) as n from votes group by k
+    ), ranked as (
+        select k, name, n, rank() over (order by n desc) as place from tally where n > 0
+    )
+    select coalesce(jsonb_agg(jsonb_build_object(
+               'place', r.place,
+               'name', coalesce(d.name, r.name),
+               'subtitle', d.subtitle,
+               'image_url', d.image_url,
+               'votes', case when f.results_show_counts then r.n end)
+             order by r.place, coalesce(d.name, r.name)), '[]'::jsonb)
+      into v_places_json
+      from ranked r
+      left join lateral (select c.name, c.subtitle, c.image_url from cands c where c.k = r.k
+                          order by c.created_at, c.ord limit 1) d on true
+     where r.place <= v_places;
+
+    return jsonb_build_object(
+        'state', case when f.results_public then 'published' else 'hidden' end,
+        'heading', coalesce(nullif(btrim(coalesce(f.group_name, '')), ''), f.title, f.name),
+        'event_name', v_event,
+        'banner_url', f.banner_url,
+        'places', v_places,
+        'show_counts', f.results_show_counts,
+        'winners', v_places_json);
+end $$;
+revoke all on function public.voting_results_payload(uuid) from public, anon, authenticated;
+
+-- Public: the winners, only once staff have published them. Nothing else is returned before that.
+create or replace function public.voting_results_public(p_slug text)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+    f public.voting_forms;
+begin
+    select * into f from public.voting_forms where slug = lower(btrim(coalesce(p_slug, '')));
+    if not found then
+        return jsonb_build_object('state', 'missing');
+    end if;
+    if not f.results_public then
+        return jsonb_build_object('state', 'hidden',
+            'heading', coalesce(nullif(btrim(coalesce(f.group_name, '')), ''), f.title, f.name));
+    end if;
+    return public.voting_results_payload(f.id);
+end $$;
+
+-- Admin: see exactly what the public page will show, published or not
+create or replace function public.voting_results_preview(p_token text, p_form_id uuid)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+begin
+    perform public.voting_admin_check(p_token);
+    return public.voting_results_payload(p_form_id);
+end $$;
+
+-- Admin: publish / hide the results page and choose what it shows, for the whole results group
+create or replace function public.voting_results_publish(p_token text, p_form_id uuid, p_public boolean,
+                                                         p_places integer default 2, p_show_counts boolean default true)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+    perform public.voting_admin_check(p_token);
+    update public.voting_forms set
+        results_public      = coalesce(p_public, false),
+        results_places      = greatest(1, least(coalesce(p_places, 2), 10)),
+        results_show_counts = coalesce(p_show_counts, true),
+        updated_at          = now()
+     where id = any(public.voting_scope(p_form_id, true));
+    return jsonb_build_object('ok', true);
+end $$;
+
+
 -- ── 8. Who can call what ─────────────────────────────────────
 
 grant execute on function public.voting_form_public(text)               to anon, authenticated;
 grant execute on function public.cast_vote(text, text, jsonb, text)     to anon, authenticated;
+grant execute on function public.voting_results_public(text)            to anon, authenticated;
 
 -- Admin functions: callable with the publishable key, but each one checks the session token
 grant execute on function public.voting_admin_login(text, boolean)      to anon, authenticated;
@@ -640,3 +757,5 @@ grant execute on function public.voting_roster_count(text)              to anon,
 grant execute on function public.voting_roster_add(text, text[], boolean) to anon, authenticated;
 grant execute on function public.voting_roster_remove(text, text[])     to anon, authenticated;
 grant execute on function public.voting_roster_lookup(text, text)       to anon, authenticated;
+grant execute on function public.voting_results_preview(text, uuid)     to anon, authenticated;
+grant execute on function public.voting_results_publish(text, uuid, boolean, integer, boolean) to anon, authenticated;
