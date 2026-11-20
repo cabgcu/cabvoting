@@ -6,6 +6,7 @@ Voting forms for CAB events, hosted at **cabgcu.com/cabvoting**. Uses the same S
 | --- | --- |
 | `index.html` | Admin: create voting forms, open/close/schedule them, live results, manual votes, student ID list. Logs in with the VIP Check In password. |
 | `vote.html?f=<link-ending>` | Public voting page for one form. Each form gets its own link (and QR code) from the admin. |
+| `results.html?f=<link-ending>` | Public results page. Shows only the top places once staff publish them (Live Results → **Public results**). |
 | `supabase-voting.sql` | Database setup. Run once in Supabase → SQL Editor (safe to re-run). |
 
 ## Setup
@@ -40,6 +41,16 @@ Poll Everywhere no longer has a public API, so text votes come in from its CSV e
 2. In Poll Everywhere, download the poll's responses as a CSV, with phone numbers included.
 3. In Live Results (or on the form's card) click **Import CSV**. The admin finds the answer, phone and source columns, matches each answer to a performer (change any that are wrong), and counts one vote per phone number. A phone's first text is the one that counts.
 4. Upload a newer export as often as you like during the show. Phone numbers already counted are skipped, so only new texts are added.
+
+## Releasing results
+
+In Live Results, the **Public results** card controls a public page at `results.html?f=<link-ending>` (use **Copy link**):
+
+1. Choose how many places to show (default **top 2**) and whether to show vote totals.
+2. Click **Preview** to see exactly what the public will see (needs the admin login in the same browser).
+3. Click **Publish results**. Until then the page says "Results coming soon", and it updates by itself within 20 seconds of publishing. **Hide results** takes it down again.
+
+It covers the whole results group (votes combined across forms). Places below the cut-off are never sent to the page, and no overall vote total is shown, so they can't be worked out. If performers tie at the cut-off, all of them are shown (two tied for 2nd both show as 2nd).
 
 ## How it's protected
 

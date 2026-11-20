@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#09090b">
+<title>CAB Results</title>
+<!-- Public results page: results.html?f=<link-ending>.
+     Shows only the top places staff publish from the admin (Live Results → Public results).
+     Lower places are never sent to this page. -->
+<style>
+:root {
+  --bg:#09090b; --card:#18181b; --line:rgba(39,39,42,.8); --line-hi:#3f3f46; --chip:rgba(39,39,42,.6);
+  --text:#d4d4d8; --head:#f4f4f5; --sub:#a1a1aa; --muted:#71717a; --faint:#52525b;
+  --ok:#34d399; --ok-bg:rgba(16,185,129,.1); --ok-line:rgba(16,185,129,.2);
+  --gold:#fbbf24; --gold-bg:rgba(251,191,36,.1); --gold-line:rgba(251,191,36,.3);
+  --silver:#d4d4d8; --silver-bg:rgba(212,212,216,.08); --silver-line:rgba(212,212,216,.22);
+  --bronze:#fb923c; --bronze-bg:rgba(251,146,60,.1); --bronze-line:rgba(251,146,60,.25);
+  --warn:#fbbf24;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); color-scheme: dark; }
+body { margin: 0; font: 15px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; }
+svg { display: block; }
+.wrap { max-width: 520px; margin: 0 auto; padding: calc(32px + env(safe-area-inset-top)) 16px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 24px; }
+.hd { padding: 0 8px; }
+.eyebrow { margin: 0 0 6px; color: var(--muted); font-size: 12px; font-weight: 500; }
+h1 { margin: 0; color: var(--head); font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -.02em; }
+.sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.sub:empty { display: none; }
+.banner { display: block; width: 100%; height: auto; border-radius: 16px; border: 1px solid var(--line); }
+.preview { padding: 10px 14px; border-radius: 12px; background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.25); color: var(--warn); font-size: 13px; font-weight: 500; text-align: center; }
+
+.list { display: flex; flex-direction: column; gap: 12px; }
+.w { display: flex; align-items: center; gap: 16px; padding: 18px; border-radius: 18px; border: 1px solid var(--line); background: var(--card); animation: rise .5s cubic-bezier(.2,.8,.2,1) both; }
+.w .p { width: 52px; height: 52px; flex-shrink: 0; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--chip); color: var(--sub); line-height: 1; }
+.w .p b { font-size: 20px; font-weight: 700; }
+.w .p span { margin-top: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+.w img { width: 56px; height: 56px; flex-shrink: 0; border-radius: 14px; object-fit: cover; background: var(--chip); }
+.w .t { flex: 1; min-width: 0; color: var(--head); font-weight: 600; font-size: 17px; line-height: 1.3; overflow-wrap: anywhere; }
+.w .t small { display: block; margin-top: 3px; color: var(--sub); font-weight: 400; font-size: 13px; }
+.w .v { flex-shrink: 0; text-align: right; color: var(--head); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.w .v span { display: block; color: var(--muted); font-size: 11px; font-weight: 500; }
+.w.pl1 { background: var(--gold-bg); border-color: var(--gold-line); padding: 22px 18px; }
+.w.pl1 .p { background: rgba(251,191,36,.15); color: var(--gold); }
+.w.pl1 .t { font-size: 20px; }
+.w.pl2 { background: var(--silver-bg); border-color: var(--silver-line); }
+.w.pl2 .p { background: rgba(212,212,216,.12); color: var(--silver); }
+.w.pl3 { background: var(--bronze-bg); border-color: var(--bronze-line); }
+.w.pl3 .p { background: rgba(251,146,60,.15); color: var(--bronze); }
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+.state { text-align: center; padding: 36px 24px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+.state .i { width: 48px; height: 48px; margin: 0 auto 16px; border-radius: 50%; background: var(--chip); color: var(--text); display: flex; align-items: center; justify-content: center; }
+.state h2 { margin: 0 0 6px; color: var(--head); font-size: 17px; font-weight: 600; }
+.state p { color: var(--sub); font-size: 14px; margin: 0; }
+.skel { display: flex; flex-direction: column; gap: 12px; opacity: .5; animation: pulse 2s infinite; }
+.skel div { height: 88px; background: var(--card); border: 1px solid var(--line); border-radius: 18px; }
+@keyframes pulse { 50% { opacity: .5; } }
+.foot { text-align: center; color: var(--faint); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div id="pv" hidden></div>
+  <div id="bn" hidden></div>
+  <header class="hd">
+    <p class="eyebrow" id="top">Canyon Activities Board · Results</p>
+    <h1 id="ttl">Results</h1>
+    <p class="sub" id="sub"></p>
+  </header>
+  <div id="app"><div class="skel" aria-label="Loading"><div></div><div></div></div></div>
+  <div class="foot">© Canyon Activities Board</div>
+</main>
+<script>
+var API = 'https://raraxpjsftqxhwkpwpab.supabase.co/rest/v1/rpc/';
+var KEY = 'sb_publishable_p4FqN3nJTT5GFNU_xqZtYg_7fPtkKhS';
+var Q = new URLSearchParams(location.search);
+var SLUG = (Q.get('f') || '').trim().toLowerCase();
+// Staff preview from the admin: results.html?f=<slug>&preview=<form id>, using the admin login on this browser
+var PREVIEW = (Q.get('preview') || '').trim();
+var app = document.getElementById('app');
+var timer = null, shown = '';
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function url(u) { return /^https:\/\//i.test(u || '') ? u : ''; }
+function ordinal(n) { var s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+function token() { try { return sessionStorage.getItem('cab_voting_token') || localStorage.getItem('cab_voting_token'); } catch (e) { return null; } }
+function svg(p) { return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>'; }
+var ICON = {
+  clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  wifi: '<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
+};
+function state(icon, title, msg) {
+  var html = '<div class="state"><div class="i">' + svg(ICON[icon]) + '</div><h2>' + esc(title) + '</h2><p>' + esc(msg) + '</p></div>';
+  if (shown !== html) { app.innerHTML = html; shown = html; }
+}
+
+function call(fn, body) {
+  return fetch(API + fn, {
+    method: 'POST',
+    headers: { 'apikey': KEY, 'Authorization': 'Bearer ' + KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function (r) { return r.ok ? r.json() : { failed: r.status }; }, function () { return { failed: 'net' }; });
+}
+
+function render(d) {
+  $('ttl').textContent = d.heading || 'Results';
+  document.title = (d.heading ? d.heading + ' · ' : '') + 'Results';
+  $('sub').textContent = d.event_name || '';
+  var banner = url(d.banner_url);
+  $('bn').innerHTML = banner ? '<img class="banner" src="' + esc(banner) + '" alt="">' : '';
+  $('bn').hidden = !banner;
+
+  if (d.state === 'hidden' && !PREVIEW) return state('clock', 'Results coming soon', 'The winners haven’t been announced yet. Keep this page open — they’ll appear here.');
+  var w = d.winners || [];
+  if (!w.length) return state('clock', 'No results yet', 'There are no votes to show yet.');
+
+  var html = '<div class="list">' + w.map(function (x, i) {
+    var img = url(x.image_url);
+    return '<div class="w pl' + Math.min(x.place, 4) + '" style="animation-delay:' + (i * 0.12) + 's">' +
+      '<div class="p"><b>' + x.place + '</b><span>' + ordinal(x.place).replace(/^\d+/, '') + '</span></div>' +
+      (img ? '<img src="' + esc(img) + '" alt="">' : '') +
+      '<div class="t">' + esc(x.name) + (x.subtitle ? '<small>' + esc(x.subtitle) + '</small>' : '') + '</div>' +
+      (x.votes != null ? '<div class="v">' + Number(x.votes).toLocaleString() + '<span>' + (x.votes === 1 ? 'vote' : 'votes') + '</span></div>' : '') +
+      '</div>';
+  }).join('') + '</div>';
+  if (shown !== html) { app.innerHTML = html; shown = html; }
+}
+
+function load() {
+  clearTimeout(timer);
+  if (!SLUG) { return state('link', 'Results page not found', 'This link is missing the event. Check the link.'); }
+  var req = PREVIEW
+    ? call('voting_results_preview', { p_token: token() || '', p_form_id: PREVIEW })
+    : call('voting_results_public', { p_slug: SLUG });
+  req.then(function (d) {
+    if (PREVIEW && d && d.failed) {
+      $('pv').hidden = true;
+      return state('lock', 'Preview needs the admin login', 'Log in to the voting admin in this browser, then open the preview again.');
+    }
+    if (!d || d.failed) { if (!shown) state('wifi', 'Connecting…', 'Trying again…'); }
+    else if (d.state === 'missing') { return state('link', 'Results page not found', 'Check the link.'); }
+    else {
+      if (PREVIEW) {
+        $('pv').className = 'preview';
+        $('pv').textContent = d.state === 'published'
+          ? 'Staff preview · this page is public'
+          : 'Staff preview · not public yet. Visitors see “Results coming soon” until you publish.';
+        $('pv').hidden = false;
+      }
+      render(d);
+    }
+    timer = setTimeout(load, 20000);
+  });
+}
+load();
+</script>
+</body>
+</html>

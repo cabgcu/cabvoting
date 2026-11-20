@@ -701,6 +701,27 @@
                 <div class="bd" id="resBreakdown"></div>
             </div>
 
+            <div class="card" id="pubCard">
+                <div class="card-title"><h2>Public results</h2><span id="pubBadge"></span></div>
+                <p class="page-sub" style="margin-top:-6px; margin-bottom:16px; font-size:13px;" id="pubHelp">A public page that shows only the top places. Lower places are never sent to it. Applies to every form in the results group.</p>
+                <div class="inline-row" style="margin-bottom:12px;">
+                    <select id="pubPlaces" class="modern-input" style="max-width:190px;" onchange="savePublicResults()">
+                        <option value="1">Show 1st place</option>
+                        <option value="2">Show top 2</option>
+                        <option value="3">Show top 3</option>
+                        <option value="4">Show top 4</option>
+                        <option value="5">Show top 5</option>
+                    </select>
+                    <label class="check-row" style="margin:0;"><input type="checkbox" id="pubCounts" onchange="savePublicResults()"> Show vote totals</label>
+                </div>
+                <div class="inline-row">
+                    <button class="btn-action secondary" onclick="previewPublicResults()">Preview</button>
+                    <button class="btn-action" id="pubToggle" onclick="savePublicResults(true)">Publish results</button>
+                    <button class="btn-action secondary" onclick="copyText(resultsLink(), 'Results link copied')">Copy link</button>
+                </div>
+                <div style="margin-top:10px; font-size:12px; color:var(--text-dim); word-break:break-all;" id="pubLink"></div>
+            </div>
+
             <div class="card">
                 <div class="card-title"><h2>Leaderboard</h2><button class="card-link" onclick="exportVotes()">Export CSV ↓</button></div>
                 <div id="leaderboard"></div>
@@ -1255,8 +1276,52 @@
         mf.innerHTML = group.map(g => `<option value="${escapeHtml(g.id)}">Add to ${escapeHtml(g.name)}</option>`).join('');
         mf.value = combined && group.some(g => g.id === prevForm) ? prevForm : f.id;
         renderManualCands();
+        renderPublicCard();
 
         renderSideCard();
+    }
+
+    // ── public results page (results.html) ─────────────────────
+    // One setting for the whole results group; the link uses the group's first form.
+    function resultsForm() { const f = activeForm(); return f ? groupForms(f)[0] : null; }
+    function resultsLink() {
+        const f = resultsForm(); if (!f) return '';
+        const u = new URL('results.html', location.href); u.search = ''; u.hash = ''; u.searchParams.set('f', f.slug); return u.toString();
+    }
+    function renderPublicCard() {
+        const f = resultsForm();
+        if (!f) return;
+        const pub = !!f.results_public;
+        document.getElementById('pubBadge').innerHTML = pub ? '<span class="status-badge sent">Published</span>' : '<span class="status-badge na">Hidden</span>';
+        document.getElementById('pubPlaces').value = String(f.results_places || 2);
+        document.getElementById('pubCounts').checked = f.results_show_counts !== false;
+        const t = document.getElementById('pubToggle');
+        t.innerText = pub ? 'Hide results' : 'Publish results';
+        t.className = pub ? 'btn-action secondary' : 'btn-action';
+        document.getElementById('pubLink').innerText = resultsLink();
+    }
+    // toggle = true flips published/hidden; otherwise just saves the places / totals choice
+    async function savePublicResults(toggle) {
+        const f = resultsForm();
+        if (!f) return;
+        const places = parseInt(document.getElementById('pubPlaces').value, 10) || 2;
+        const counts = document.getElementById('pubCounts').checked;
+        const pub = toggle ? !f.results_public : !!f.results_public;
+        if (toggle && pub && !confirm(`Publish the top ${places === 1 ? 'place' : places + ' places'} of "${(f.group_name || f.name).trim()}" on the public results page?\n\nAnyone with the link will see ${places === 1 ? 'the winner' : 'them'}${counts ? ' and their vote totals' : ''}. Lower places stay hidden.`)) return;
+        try {
+            await rpc('voting_results_publish', { p_form_id: f.id, p_public: pub, p_places: places, p_show_counts: counts });
+            groupForms(f).forEach(m => { m.results_public = pub; m.results_places = places; m.results_show_counts = counts; });
+            renderPublicCard();
+            showToast(toggle ? (pub ? 'Results published' : 'Results hidden') : 'Saved');
+        } catch (e) {
+            showToast('Could not save — run the latest supabase-voting.sql in Supabase');
+            renderPublicCard();
+        }
+    }
+    function previewPublicResults() {
+        const f = resultsForm(); if (!f) return;
+        const u = new URL(resultsLink()); u.searchParams.set('preview', f.id);
+        window.open(u.toString(), '_blank');
     }
 
     function manualTargetForm() {
